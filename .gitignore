@@ -1,0 +1,36 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Рабочие данные программы (СОДЕРЖАТ ПЕРСОНАЛЬНЫЕ ДАННЫЕ) ---
+# ФИО, телефоны, госномера, фотографии сотрудников — в репозиторий не кладём
+data/
+settings.json
+журнал_*.csv
+журнал_*.xlsx
+cars_database.json
+crash.log
+*.bak
+*.tmp
+_temp_*
+_print_*
+photos/
+test_DoT_Icons.png
+Backup_GET_*.zip
+
+# --- Ресурсы, которые ставятся на месте установки ---
+template.png
+app_icon.ico
+fonts/
+
+# --- Сборка ---
+build/
+dist/
+*.spec
+.acl_applied
