@@ -10,6 +10,8 @@ from tkinter import filedialog, messagebox, ttk
 
 from getpass_core import backup as backup_mod
 from getpass_core import config, printing
+from getpass_core.dpi import (apply_scaling, enable_dpi_awareness, fit_to_screen,
+                              scaled)
 from getpass_core import render as R
 from getpass_core.domain import (add_months_safe, add_years_safe, format_date,
                                  next_number, parse_date)
@@ -17,7 +19,7 @@ from getpass_core.fonts import (fonts_are_missing, setup_ui_font, ui_family,
                                 verify_ui_family)
 from getpass_core.registry import BADGE_REGISTRY, PASS_REGISTRY, save_registry_pdf
 from getpass_core.storage import (BADGE_JOURNAL, PASS_JOURNAL, FileBusy,
-                                  update_cars_cache)
+                                  export_journal, update_cars_cache)
 
 from . import batch as B
 from .badge_tab import BadgePanel
@@ -35,10 +37,16 @@ class App:
         self.settings = config.load_settings()
         config.harden_data_dir()
 
+        enable_dpi_awareness()      # на случай запуска App в обход main()
         self.root = tk.Tk()
         self.root.title("СПб ГУП «Горэлектротранс» — Система выпуска пропусков и бейджей")
-        self.root.geometry("1500x920")
-        self.root.minsize(1080, 720)
+        # масштаб экрана: на 125/150% интерфейс должен стать крупнее, а не мыльнее
+        self.scale = apply_scaling(self.root)
+        win_w, win_h = fit_to_screen(self.root, scaled(1500, self.scale),
+                                     scaled(920, self.scale))
+        self.root.geometry(f"{win_w}x{win_h}")
+        self.root.minsize(min(win_w, scaled(1000, self.scale)),
+                          min(win_h, scaled(660, self.scale)))
         self.root.configure(bg=CLR_BG)
         if os.path.exists(config.ICON_FILE):
             try:
@@ -62,7 +70,7 @@ class App:
 
         self.preview = Debouncer(self.root, self._render_preview, 150)
         self._build_pass_tab()
-        self.badge = BadgePanel(self.notebook, self.settings, self.root)
+        self.badge = BadgePanel(self.notebook, self.settings, self.root, self.scale)
         self.badge.bind_app(self)
 
         self._bind_hotkeys()
@@ -187,12 +195,18 @@ class App:
                       pady=7, padx=12).pack(side="left", padx=(0, 6))
         styled_button(row2, "📊 Журнал ТС", self.open_pass_journal, "#334E68",
                       pady=7, padx=14).pack(side="right")
+        row3 = tk.Frame(btn_bar, bg=CLR_BG)
+        row3.pack(fill="x", pady=(6, 0))
+        styled_button(row3, "🗄 Внести в базу (без печати)", self.save_pass_to_journal,
+                      "#2E7D32", pady=7, padx=12).pack(side="left", padx=(0, 6))
+        styled_button(row3, "📤 Выгрузить таблицу", self.export_pass_journal, "#00838F",
+                      pady=7, padx=12).pack(side="left")
 
         paned = tk.PanedWindow(container, orient="horizontal", bg="#CBD2D9",
                                sashwidth=5, sashrelief="raised", borderwidth=0)
         paned.pack(side="top", fill="both", expand=True)
         left = tk.Frame(paned, bg=CLR_CARD)
-        paned.add(left, minsize=420, width=700)
+        paned.add(left, minsize=scaled(420, self.scale), width=scaled(700, self.scale))
         _, _, inner = make_scrollable(left, CLR_CARD)
 
         self.pass_notebook = ttk.Notebook(inner)
@@ -268,7 +282,7 @@ class App:
         self.preview_panel = tk.LabelFrame(paned, text=" ПРЕДПРОСМОТР ПРОПУСКА НА ТС ",
                                            font=F(11, True), bg="#FFFFFF", fg=CLR_NAVY,
                                            padx=12, pady=10)
-        paned.add(self.preview_panel, minsize=330, width=520)
+        paned.add(self.preview_panel, minsize=scaled(330, self.scale), width=scaled(520, self.scale))
         switch = tk.Frame(self.preview_panel, bg="#FFFFFF")
         switch.pack(fill="x", pady=(0, 6))
         tk.Label(switch, text="Показывать:", bg="#FFFFFF", fg="#334E68",
@@ -633,6 +647,81 @@ class App:
                 + ("Документ открыт — напечатайте вручную (Ctrl+P).\n\n" if opened else "")
                 + "Считать пропуск выданным и записать в журнал?"):
             self._finish_pass(records, next_num)
+
+    def _collect_pass_records(self):
+        """Записи журнала по заполненной форме, без отрисовки документа."""
+        issue, valid = self._validate_pass_dates()
+        if issue is None:
+            return None
+        if self.p1.is_empty():
+            messagebox.showwarning("Внимание",
+                                   "Заполните «Гос. номер автомобиля» во вкладке «Пропуск №1»!")
+            self.notebook.select(0)
+            self.pass_notebook.select(self.p1.frame)
+            self.p1.plate.focus()
+            return None
+        common = {"issue_date": format_date(issue), "valid_until": format_date(valid),
+                  "otb_post": self.entry_otb_post.get().strip(),
+                  "otb_name": self.entry_otb_name.get().strip(),
+                  "is_temporary": self.is_temp_var.get()}
+        forms = [self.p1]
+        if self.print_mode.get() == "a4" and not self.p2.is_empty():
+            forms.append(self.p2)
+        if not self._check_duplicates(forms):
+            return None
+        records = [dict(form.data(), **common) for form in forms]
+        return records, next_number(forms[-1].data()["num"])
+
+    def save_pass_to_journal(self):
+        """Внести пропуск в базу, не формируя документ."""
+        collected = self._collect_pass_records()
+        if not collected:
+            return
+        records, next_num = collected
+        plates = ", ".join(r["plate"] for r in records)
+        if not messagebox.askyesno(
+                "Внести в базу",
+                f"Записать в журнал без печати ({len(records)} шт.)?\n\n{plates}\n\n"
+                "Номер бланка будет увеличен, форма очищена."):
+            return
+        self._finish_pass(records, next_num)
+        messagebox.showinfo("Готово",
+                            f"Записей внесено: {len(records)}.\n"
+                            f"Следующий номер: {next_num.value}")
+
+    def export_pass_journal(self):
+        self._export_journal(PASS_JOURNAL, "Журнал_пропусков_ТС")
+
+    def export_badge_journal(self):
+        self._export_journal(BADGE_JOURNAL, "Журнал_работников")
+
+    def _export_journal(self, journal, name):
+        """Выгрузить журнал в отдельный файл (XLSX или CSV)."""
+        if not journal.read():
+            messagebox.showinfo("Журнал пуст", "В базе нет записей для выгрузки.")
+            return
+        today = datetime.now().strftime("%Y-%m-%d")
+        path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Таблица Excel", "*.xlsx"), ("CSV (разделитель ;)", "*.csv")],
+            initialfile=f"{name}_{today}.xlsx")
+        if not path:
+            return
+        try:
+            count = export_journal(journal, path)
+        except PermissionError:
+            messagebox.showerror("Файл занят",
+                                 "Файл открыт в другой программе. Закройте его и повторите.")
+            return
+        except Exception as exc:
+            messagebox.showerror("Ошибка", f"Не удалось выгрузить таблицу:\n{exc}")
+            return
+        if messagebox.askyesno("Выгружено",
+                               f"Записей выгружено: {count}\n{path}\n\nОткрыть файл?"):
+            try:
+                os.startfile(path)  # noqa: Windows only
+            except Exception:
+                pass
 
     # =============================================== реестры и журналы
 

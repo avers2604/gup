@@ -3,7 +3,6 @@ import os
 import sys
 
 import pytest
-from PIL import Image, ImageDraw
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -33,15 +32,9 @@ def journal(data_dir):
 
 
 @pytest.fixture
-def template(tmp_path, monkeypatch):
-    """Синтетический бланк — тесты не должны зависеть от рабочего template.png."""
-    from getpass_core import config, render
-    path = tmp_path / "template.png"
-    im = Image.new("RGB", (2480, 1560), "#FFFFFF")
-    d = ImageDraw.Draw(im)
-    d.rectangle([60, 65, 890, 260], fill="#E3ECF5")
-    im.save(path)
-    monkeypatch.setattr(config, "TEMPLATE_FILE", str(path))
+def template():
+    """Бланк строится кодом; фикстура лишь сбрасывает кэш подложки."""
+    from getpass_core import render
     render.reset_template_cache()
-    yield path
+    yield None
     render.reset_template_cache()

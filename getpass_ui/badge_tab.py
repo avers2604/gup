@@ -23,9 +23,10 @@ PARKS = ["ОСП «Трамвайный парк № 8»", "ОСП «Трамв�
 
 
 class BadgePanel:
-    def __init__(self, notebook, settings, root):
+    def __init__(self, notebook, settings, root, scale=1.0):
         self.settings = settings
         self.root = root
+        self.scale = scale
         self.photo_path = None
         self.preview = Debouncer(root, self._render_preview, 60)
 
@@ -38,7 +39,7 @@ class BadgePanel:
                                sashwidth=5, sashrelief="raised", borderwidth=0)
         paned.pack(side="top", fill="both", expand=True)
         left = tk.Frame(paned, bg=CLR_BG)
-        paned.add(left, minsize=420, width=680)
+        paned.add(left, minsize=int(420 * self.scale), width=int(680 * self.scale))
         _, _, self.left_panel = make_scrollable(left, CLR_BG)
         self._build_form()
         self._build_preview(paned)
@@ -49,6 +50,7 @@ class BadgePanel:
         self._btn_batch.config(command=app.open_batch_badges)
         self._btn_registry.config(command=app.registry_badges)
         self._btn_journal.config(command=app.open_badge_journal)
+        self._btn_export.config(command=app.export_badge_journal)
 
     # ------------------------------------------------------- разметка
 
@@ -73,6 +75,13 @@ class BadgePanel:
         self._btn_journal = styled_button(row2, "📊 Журнал бейджей", lambda: None,
                                           "#334E68", pady=7, padx=14)
         self._btn_journal.pack(side="right")
+        row3 = tk.Frame(bar, bg=CLR_BG)
+        row3.pack(fill="x", pady=(6, 0))
+        styled_button(row3, "🗄 Внести в базу (без печати)", self.save_to_journal,
+                      "#2E7D32", pady=7, padx=12).pack(side="left", padx=(0, 6))
+        self._btn_export = styled_button(row3, "📤 Выгрузить таблицу", lambda: None,
+                                         "#00838F", pady=7, padx=12)
+        self._btn_export.pack(side="left")
 
     def _build_form(self):
         card = tk.LabelFrame(self.left_panel, text=" Данные сотрудника ",
@@ -167,7 +176,7 @@ class BadgePanel:
         self.panel = tk.LabelFrame(paned, text=" ПРЕДПРОСМОТР БЕЙДЖА (85 × 54 мм) ",
                                    font=F(11, True), bg="#FFFFFF", fg=CLR_NAVY,
                                    padx=14, pady=12)
-        paned.add(self.panel, minsize=330, width=520)
+        paned.add(self.panel, minsize=int(330 * self.scale), width=int(520 * self.scale))
         self.preview_label = tk.Label(self.panel, bg="#FFFFFF", relief="solid",
                                       borderwidth=1, text="Предпросмотр загружается...",
                                       fg="#829AB1", font=F(10))
@@ -208,7 +217,7 @@ class BadgePanel:
         if not path:
             return
         self.photo_status.config(text="⏳ Открыт редактор кадрирования...", fg="#1565C0")
-        open_crop_window(self.root, path, self._apply_crop)
+        open_crop_window(self.root, path, self._apply_crop, self.scale)
 
     def _apply_crop(self, cropped, box):
         # каждый кадр сохраняется отдельным файлом в архиве фотографий:
@@ -239,8 +248,8 @@ class BadgePanel:
                 "valid_until": self.valid.get().strip()
                 or format_date(add_years_safe(datetime.now(), 5))}
 
-    def validated_data(self):
-        if not self.photo_path or not os.path.exists(self.photo_path):
+    def validated_data(self, require_photo=True):
+        if require_photo and (not self.photo_path or not os.path.exists(self.photo_path)):
             messagebox.showwarning("Фото обязательно",
                                    "Выберите фотографию сотрудника и обрежьте её в редакторе!")
             return None
@@ -312,6 +321,21 @@ class BadgePanel:
         self.tab_num.insert(0, nxt.value)
         self.clear_form()
         return nxt.value
+
+    def save_to_journal(self):
+        """Внести работника в базу, не формируя бейдж (фото не требуется)."""
+        data = self.validated_data(require_photo=False)
+        if not data:
+            return
+        if not messagebox.askyesno(
+                "Внести в базу",
+                f"Записать в журнал без печати?\n\n"
+                f"{data['fio']}, таб. № {data['tab_num']}\n\n"
+                "Табельный номер будет увеличен, форма очищена."):
+            return
+        nxt = self._finish(data, self._operator())
+        messagebox.showinfo("Готово",
+                            f"Запись внесена.\nСледующий табельный номер: {nxt}")
 
     def generate_pdf(self, operator=""):
         data = self.validated_data()

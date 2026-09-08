@@ -128,3 +128,30 @@ class TestCarsCache:
         from getpass_core.storage import load_cars_cache, update_cars_cache
         update_cars_cache([{"plate": f"А{i:03d}АА78", "brand": "ГАЗ"} for i in range(20)])
         assert len(load_cars_cache()) == 20
+
+
+class TestExport:
+    def test_exports_csv(self, journal, tmp_path):
+        from getpass_core.storage import export_journal
+        journal.append_many([{"num": "001-26", "plate": "О777ТВ198",
+                              "driver": "Смирнов А.В.", "valid_until": "31.12.2026"}])
+        out = tmp_path / "выгрузка.csv"
+        assert export_journal(journal, str(out)) == 1
+        text = out.read_text(encoding="utf-8-sig")
+        assert "Номер пропуска" in text
+        assert "О777ТВ198" in text
+
+    def test_exports_xlsx(self, journal, tmp_path):
+        import zipfile
+
+        from getpass_core.storage import export_journal
+        journal.append_many([{"num": "001-26", "plate": "А111АА78"}])
+        out = tmp_path / "выгрузка.xlsx"
+        assert export_journal(journal, str(out)) == 1
+        with zipfile.ZipFile(out) as z:
+            assert "xl/worksheets/sheet1.xml" in z.namelist()
+            assert b"\xd0\x90111\xd0\x90\xd0\x9078" in z.read("xl/worksheets/sheet1.xml")
+
+    def test_export_of_empty_journal(self, journal, tmp_path):
+        from getpass_core.storage import export_journal
+        assert export_journal(journal, str(tmp_path / "пусто.csv")) == 0

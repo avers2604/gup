@@ -74,29 +74,21 @@ def test_startup_shows_no_modal_from_preview(app, monkeypatch):
     assert seen == []
 
 
-def test_preview_renders_after_input(app, tmp_path, monkeypatch):
-    from PIL import Image
-
-    from getpass_core import config
-    from getpass_core import render
-    path = tmp_path / "template.png"
-    Image.new("RGB", (2480, 1560), "white").save(path)
-    monkeypatch.setattr(config, "TEMPLATE_FILE", str(path))
-    render.reset_template_cache()
+def test_preview_renders_after_input(app):
     app.p1.plate_var.set("о777тв198")
     pump(app.root, 1.0)
     assert app.preview_label.cget("text") == ""
-    render.reset_template_cache()
 
 
-def test_preview_reports_missing_template(app, tmp_path, monkeypatch):
-    """Без бланка предпросмотр объясняет причину, а не молчит и не падает."""
+def test_preview_works_without_any_template_file(app, tmp_path, monkeypatch):
+    """Бланк строится кодом: предпросмотр обязан работать без template.png."""
     from getpass_core import config, render
     monkeypatch.setattr(config, "TEMPLATE_FILE", str(tmp_path / "нет.png"))
     render.reset_template_cache()
     app.p1.plate_var.set("о777тв198")
-    pump(app.root, 1.0)
-    assert "template.png" in app.preview_label.cget("text")
+    pump(app.root, 1.2)
+    assert app.preview_label.cget("text") == ""
+    assert app.preview_label.cget("image") != ""
     render.reset_template_cache()
 
 
@@ -223,3 +215,83 @@ def test_unavailable_brand_font_falls_back(app, monkeypatch):
     from getpass_core import fonts
     monkeypatch.setattr(fonts, "UI_FAMILY", "Шрифт Которого Нет")
     assert fonts.verify_ui_family(app.root) == "Segoe UI"
+
+
+def test_new_action_buttons_are_present(app):
+    """Кнопки внесения в базу и выгрузки таблицы должны быть на обеих вкладках."""
+    def button_texts(widget, found=None):
+        found = [] if found is None else found
+        for child in widget.winfo_children():
+            try:
+                if child.winfo_class() == "Button":
+                    found.append(child.cget("text"))
+            except Exception:
+                pass
+            button_texts(child, found)
+        return found
+
+    app.notebook.select(0)
+    pump(app.root, 0.4)
+    texts = " | ".join(button_texts(app.root))
+    assert "Внести в базу" in texts
+    assert "Выгрузить таблицу" in texts
+
+
+def test_save_to_journal_writes_without_printing(app, monkeypatch):
+    from tkinter import messagebox
+
+    from getpass_core.storage import PASS_JOURNAL
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
+    before = len(PASS_JOURNAL.read())
+    app.p1.plate_var.set("о777тв198")
+    app.p1.d_fio.insert(0, "Смирнов А.В.")
+    app.print_mode.set("a5")
+    app.save_pass_to_journal()
+    after = PASS_JOURNAL.read()
+    assert len(after) == before + 1
+    assert after[-1]["plate"] == "О777ТВ198"
+    assert app.p1.is_empty(), "форма должна очищаться после внесения"
+
+
+def test_badge_save_to_journal_needs_no_photo(app, monkeypatch):
+    from tkinter import messagebox
+
+    from getpass_core.storage import BADGE_JOURNAL
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
+    b = app.badge
+    b.sur_var.set("ИВАНОВ")
+    b.nam_var.set("ИВАН")
+    b.role.insert(0, "Водитель трамвая")
+    assert b.photo_path is None
+    before = len(BADGE_JOURNAL.read())
+    b.save_to_journal()
+    after = BADGE_JOURNAL.read()
+    assert len(after) == before + 1
+    assert after[-1]["fio"].startswith("ИВАНОВ")
+
+
+def test_crop_window_fits_small_screen(app, monkeypatch):
+    """Регрессия: окно было жёстко 760x920 и кнопки уезжали под панель задач."""
+    from PIL import Image
+
+    from getpass_ui.crop_window import CropWindow
+    monkeypatch.setattr(app.root, "winfo_screenwidth", lambda: 1366)
+    monkeypatch.setattr(app.root, "winfo_screenheight", lambda: 768)
+    window = CropWindow(app.root, Image.new("RGB", (1200, 1600), "#888"), lambda *a: None)
+    pump(app.root, 0.5)
+    geometry = window.win.geometry().split("+")[0]
+    width, height = (int(v) for v in geometry.split("x"))
+    assert height <= 768 - 40, f"окно {height} px выше рабочей области экрана"
+    for button in window.btn_bar.winfo_children():
+        ok, info = _really_visible(button, min_w=60, min_h=20)
+        assert ok, f"кнопка окна кадрирования не видна: {info}"
+    window.win.destroy()
+
+
+def test_window_geometry_respects_screen(app):
+    """Главное окно не должно быть больше экрана."""
+    app.root.update()
+    geometry = app.root.geometry().split("+")[0]
+    width, height = (int(v) for v in geometry.split("x"))
+    assert width <= app.root.winfo_screenwidth()
+    assert height <= app.root.winfo_screenheight()

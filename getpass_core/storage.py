@@ -405,3 +405,18 @@ def update_cars_cache(car_infos) -> None:
 
 def lookup_car(plate: str) -> dict | None:
     return load_cars_cache().get(plate_key(plate))
+
+
+def export_journal(journal, filepath: str) -> int:
+    """Выгрузить журнал в отдельный файл XLSX или CSV. Возвращает число записей."""
+    records = journal.read()
+    schema = journal.schema
+    rows = [[rec.get(k, "") for k in schema.keys] for rec in records]
+    if filepath.lower().endswith(".csv"):
+        with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f, delimiter=";")
+            writer.writerow(schema.header)
+            writer.writerows(rows)
+    else:
+        export_records_to_xlsx(rows, schema.cols_def, filepath, schema.name)
+    return len(records)
