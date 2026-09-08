@@ -67,7 +67,6 @@ _AUDIT_FIELDS = (
     Field("status", "Статус", 16, 100, "center"),
     Field("revoked_at", "Аннулирован", 16, 95, "center"),
     Field("revoke_reason", "Причина", 30, 160, "w"),
-    Field("operator", "Оформил", 26, 140, "w"),
 )
 
 PASS_SCHEMA = JournalSchema(

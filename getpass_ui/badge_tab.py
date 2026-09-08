@@ -77,8 +77,6 @@ class BadgePanel:
         self._btn_journal.pack(side="right")
         row3 = tk.Frame(bar, bg=CLR_BG)
         row3.pack(fill="x", pady=(6, 0))
-        styled_button(row3, "🗄 Внести в базу (без печати)", self.save_to_journal,
-                      "#2E7D32", pady=7, padx=12).pack(side="left", padx=(0, 6))
         self._btn_export = styled_button(row3, "📤 Выгрузить таблицу", lambda: None,
                                          "#00838F", pady=7, padx=12)
         self._btn_export.pack(side="left")
@@ -248,8 +246,8 @@ class BadgePanel:
                 "valid_until": self.valid.get().strip()
                 or format_date(add_years_safe(datetime.now(), 5))}
 
-    def validated_data(self, require_photo=True):
-        if require_photo and (not self.photo_path or not os.path.exists(self.photo_path)):
+    def validated_data(self):
+        if not self.photo_path or not os.path.exists(self.photo_path):
             messagebox.showwarning("Фото обязательно",
                                    "Выберите фотографию сотрудника и обрежьте её в редакторе!")
             return None
@@ -301,8 +299,8 @@ class BadgePanel:
 
     # --------------------------------------------------------- выпуск
 
-    def _finish(self, data, operator):
-        record = dict(data, operator=operator)
+    def _finish(self, data):
+        record = dict(data)
         try:
             BADGE_JOURNAL.append_many([record])
         except FileBusy as exc:
@@ -322,22 +320,7 @@ class BadgePanel:
         self.clear_form()
         return nxt.value
 
-    def save_to_journal(self):
-        """Внести работника в базу, не формируя бейдж (фото не требуется)."""
-        data = self.validated_data(require_photo=False)
-        if not data:
-            return
-        if not messagebox.askyesno(
-                "Внести в базу",
-                f"Записать в журнал без печати?\n\n"
-                f"{data['fio']}, таб. № {data['tab_num']}\n\n"
-                "Табельный номер будет увеличен, форма очищена."):
-            return
-        nxt = self._finish(data, self._operator())
-        messagebox.showinfo("Готово",
-                            f"Запись внесена.\nСледующий табельный номер: {nxt}")
-
-    def generate_pdf(self, operator=""):
+    def generate_pdf(self):
         data = self.validated_data()
         if not data:
             return
@@ -352,7 +335,7 @@ class BadgePanel:
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось сохранить файл:\n{exc}")
             return
-        nxt = self._finish(data, self._operator())
+        nxt = self._finish(data)
         messagebox.showinfo("Готово",
                             f"Пропуск работника сформирован!\nСледующий табельный: {nxt}")
 
@@ -364,7 +347,7 @@ class BadgePanel:
         printer = self.app.printer_var.get() if self.app else printing.DEFAULT_PRINTER
         ok, err = printing.send_image_to_printer(document, printer)
         if ok:
-            self._finish(data, self._operator())
+            self._finish(data)
             messagebox.showinfo("Печать", "Бейдж успешно отправлен на принтер!")
             return
         temp_pdf = os.path.join(config.DATA_DIR, f"_print_{prefix}.pdf")
@@ -380,10 +363,7 @@ class BadgePanel:
                 f"Не удалось напечатать напрямую.\n{err or ''}\n\n"
                 + ("Документ открыт — напечатайте вручную (Ctrl+P).\n\n" if opened else "")
                 + "Считать бейдж выданным и записать в журнал?"):
-            self._finish(data, self._operator())
-
-    def _operator(self):
-        return self.app.operator_var.get().strip() if self.app else ""
+            self._finish(data)
 
     # ---------------------------------------------------------- прочее
 

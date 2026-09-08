@@ -21,10 +21,10 @@ class TestSettings:
         assert "issue_date" in s
 
     def test_roundtrip(self, data_dir):
-        config.save_settings({"last_pass_num": "042-26", "operator_name": "Петров"})
+        config.save_settings({"last_pass_num": "042-26", "print_mode": "a5"})
         s = config.load_settings()
         assert s["last_pass_num"] == "042-26"
-        assert s["operator_name"] == "Петров"
+        assert s["print_mode"] == "a5"
 
     def test_ignores_unknown_and_null_keys(self, data_dir):
         import json

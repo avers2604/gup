@@ -217,8 +217,8 @@ def test_unavailable_brand_font_falls_back(app, monkeypatch):
     assert fonts.verify_ui_family(app.root) == "Segoe UI"
 
 
-def test_new_action_buttons_are_present(app):
-    """Кнопки внесения в базу и выгрузки таблицы должны быть на обеих вкладках."""
+def test_export_button_is_present(app):
+    """Кнопка выгрузки таблицы должна быть на вкладке."""
     def button_texts(widget, found=None):
         found = [] if found is None else found
         for child in widget.winfo_children():
@@ -233,41 +233,8 @@ def test_new_action_buttons_are_present(app):
     app.notebook.select(0)
     pump(app.root, 0.4)
     texts = " | ".join(button_texts(app.root))
-    assert "Внести в базу" in texts
     assert "Выгрузить таблицу" in texts
-
-
-def test_save_to_journal_writes_without_printing(app, monkeypatch):
-    from tkinter import messagebox
-
-    from getpass_core.storage import PASS_JOURNAL
-    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
-    before = len(PASS_JOURNAL.read())
-    app.p1.plate_var.set("о777тв198")
-    app.p1.d_fio.insert(0, "Смирнов А.В.")
-    app.print_mode.set("a5")
-    app.save_pass_to_journal()
-    after = PASS_JOURNAL.read()
-    assert len(after) == before + 1
-    assert after[-1]["plate"] == "О777ТВ198"
-    assert app.p1.is_empty(), "форма должна очищаться после внесения"
-
-
-def test_badge_save_to_journal_needs_no_photo(app, monkeypatch):
-    from tkinter import messagebox
-
-    from getpass_core.storage import BADGE_JOURNAL
-    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
-    b = app.badge
-    b.sur_var.set("ИВАНОВ")
-    b.nam_var.set("ИВАН")
-    b.role.insert(0, "Водитель трамвая")
-    assert b.photo_path is None
-    before = len(BADGE_JOURNAL.read())
-    b.save_to_journal()
-    after = BADGE_JOURNAL.read()
-    assert len(after) == before + 1
-    assert after[-1]["fio"].startswith("ИВАНОВ")
+    assert "Внести в базу" not in texts
 
 
 def test_crop_window_fits_small_screen(app, monkeypatch):
