@@ -20,12 +20,27 @@ def F(size, bold=False, italic=False):
 
 
 def make_scrollable(parent, bg_color):
+    """Прокручиваемая область: рамка -> холст -> внутренняя рамка с формой."""
     wrapper = tk.Frame(parent, bg=bg_color)
+    # ВАЖНО: без этого wrapper остаётся неуправляемым (1x1, не отображён),
+    # и вся форма внутри холста не видна на экране
+    wrapper.pack(fill="both", expand=True)
     canvas = tk.Canvas(wrapper, bg=bg_color, highlightthickness=0, bd=0)
     scroll = ttk.Scrollbar(wrapper, orient="vertical", command=canvas.yview)
     inner = tk.Frame(canvas, bg=bg_color)
-    inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.create_window((0, 0), window=inner, anchor="nw")
+    window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+    def _on_inner_resize(_event=None):
+        canvas.configure(scrollregion=canvas.bbox("all"))
+
+    def _on_canvas_resize(event):
+        # внутренняя рамка должна занимать всю ширину холста, иначе поля,
+        # разложенные через fill="x", схлопываются до собственной ширины
+        canvas.itemconfigure(window_id, width=event.width)
+        canvas.configure(scrollregion=canvas.bbox("all"))
+
+    inner.bind("<Configure>", _on_inner_resize)
+    canvas.bind("<Configure>", _on_canvas_resize)
     canvas.configure(yscrollcommand=scroll.set)
     canvas.pack(side="left", fill="both", expand=True)
     scroll.pack(side="right", fill="y")

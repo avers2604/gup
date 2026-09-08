@@ -1,10 +1,13 @@
 import os
 
-import pypdf
 import pytest
 from PIL import Image
 
 from getpass_core.pdfwriter import write_pdf
+
+# pypdf нужен только для проверки корректности PDF и не входит в
+# requirements.txt — без него тесты структуры пропускаются, а не падают
+pypdf = pytest.importorskip("pypdf")
 
 
 def pages(n, size=(2480, 3508)):

@@ -153,3 +153,73 @@ def test_settings_saved_on_close(app, monkeypatch):
     app.on_closing()
     from getpass_core import config
     assert config.load_settings()["otb_name"] == "Петров И.С."
+
+
+def _really_visible(widget, min_w=40, min_h=12):
+    """Виден ли виджет фактически.
+
+    Проверять winfo_ismapped() у самого поля недостаточно: Tk сообщает 1 и
+    тогда, когда родительский холст схлопнут в 1x1 и не отображён. Нужно
+    пройти всю цепочку предков.
+    """
+    node = widget
+    while node is not None:
+        if not node.winfo_ismapped():
+            return False, f"предок {node.winfo_class()} не отображён"
+        if node.winfo_width() <= 1 or node.winfo_height() <= 1:
+            return False, (f"предок {node.winfo_class()} схлопнут в "
+                           f"{node.winfo_width()}x{node.winfo_height()}")
+        node = node.master
+    if widget.winfo_width() < min_w or widget.winfo_height() < min_h:
+        return False, f"размер {widget.winfo_width()}x{widget.winfo_height()}"
+    return True, "ок"
+
+
+@pytest.mark.parametrize("geometry", ["1500x920", "1080x720"])
+def test_pass_tab_input_fields_are_visible(app, geometry):
+    """Регрессия: прокручиваемая область не упаковывалась, и вся форма была невидима."""
+    app.root.geometry(geometry)
+    app.notebook.select(0)
+    pump(app.root, 1.0)
+    fields = {
+        "Номер бланка": app.p1.num, "Госномер": app.p1.plate, "Марка": app.p1.brand,
+        "Модель": app.p1.model, "Вид": app.p1.type, "Цвет": app.p1.color,
+        "Должность водителя": app.p1.d_pos, "ФИО водителя": app.p1.d_fio,
+        "Телефон водителя": app.p1.d_phone, "Зона допуска": app.p1.territory,
+        "Дата выдачи": app.entry_issue, "Действителен до": app.entry_valid,
+        "Должность ОТБ": app.entry_otb_post, "ФИО ОТБ": app.entry_otb_name,
+    }
+    hidden = {name: _really_visible(w)[1] for name, w in fields.items()
+              if not _really_visible(w)[0]}
+    assert not hidden, f"невидимые поля: {hidden}"
+
+
+def test_badge_tab_input_fields_are_visible(app):
+    app.root.geometry("1500x920")
+    app.notebook.select(1)
+    pump(app.root, 1.0)
+    b = app.badge
+    fields = {
+        "Подразделение": b.park, "Табельный номер": b.tab_num, "Должность": b.role,
+        "Фамилия": b.sur_ent, "Имя": b.nam_ent, "Отчество": b.pat_ent,
+        "Телефон": b.phone, "Выдан": b.issue, "До": b.valid,
+    }
+    hidden = {name: _really_visible(w)[1] for name, w in fields.items()
+              if not _really_visible(w)[0]}
+    assert not hidden, f"невидимые поля: {hidden}"
+
+
+def test_form_stretches_to_panel_width(app):
+    """Внутренняя рамка должна тянуться по ширине холста, иначе поля схлопываются."""
+    app.notebook.select(0)
+    app.root.geometry("1500x920")
+    pump(app.root, 1.0)
+    assert app.p1.brand.winfo_width() > 150, "поле «Марка» не растянулось"
+    assert app.p1.plate.winfo_width() > 300, "поле госномера не растянулось"
+
+
+def test_unavailable_brand_font_falls_back(app, monkeypatch):
+    """Если Tk не видит зарегистрированный брендбук-шрифт — откат на Segoe UI."""
+    from getpass_core import fonts
+    monkeypatch.setattr(fonts, "UI_FAMILY", "Шрифт Которого Нет")
+    assert fonts.verify_ui_family(app.root) == "Segoe UI"
