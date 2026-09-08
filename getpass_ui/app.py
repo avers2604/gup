@@ -13,7 +13,8 @@ from getpass_core import config, printing
 from getpass_core import render as R
 from getpass_core.domain import (add_months_safe, add_years_safe, format_date,
                                  next_number, parse_date)
-from getpass_core.fonts import fonts_are_missing, setup_ui_font, ui_family
+from getpass_core.fonts import (fonts_are_missing, setup_ui_font, ui_family,
+                                verify_ui_family)
 from getpass_core.registry import BADGE_REGISTRY, PASS_REGISTRY, save_registry_pdf
 from getpass_core.storage import (BADGE_JOURNAL, PASS_JOURNAL, FileBusy,
                                   update_cars_cache)
@@ -45,6 +46,10 @@ class App:
             except Exception:
                 pass
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # шрифт проверяем уже после создания root: до него список семейств
+        # Tk недоступен
+        verify_ui_family(self.root)
 
         self._apply_style()
         self._build_header()
@@ -221,12 +226,16 @@ class App:
                  font=F(9)).pack(side="left")
         self.entry_valid = ttk.Entry(row, width=13, font=F(9))
         self.entry_valid.insert(0, self.settings["valid_until"])
-        self.entry_valid.pack(side="left", padx=(6, 16))
+        self.entry_valid.pack(side="left", padx=(6, 0))
+        # галка живёт на отдельной строке: в одной строке с двумя датами
+        # её подпись не помещалась и обрезалась вместе с самим переключателем
         self.is_temp_var = tk.BooleanVar(value=self.settings.get("is_temporary_car", False))
-        tk.Checkbutton(row, text="⚠️ Временный пропуск на ТС (до 3 мес)",
+        row_temp = tk.Frame(box, bg=CLR_CARD)
+        row_temp.pack(fill="x", pady=(2, 0))
+        tk.Checkbutton(row_temp, text="⚠️ Временный пропуск на ТС (не более 3 месяцев)",
                        variable=self.is_temp_var, command=self.on_toggle_temp,
                        bg=CLR_CARD, activebackground=CLR_CARD, font=F(9, True),
-                       fg="#C62828").pack(side="left")
+                       fg="#C62828", anchor="w").pack(side="left", anchor="w")
 
         row2 = tk.Frame(box, bg=CLR_CARD)
         row2.pack(fill="x", pady=(4, 2))

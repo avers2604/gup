@@ -140,6 +140,27 @@ def ui_family() -> str:
     return UI_FAMILY
 
 
+def verify_ui_family(root) -> str:
+    """Проверить, что Tk действительно видит брендбук-шрифт.
+
+    AddFontResourceW регистрирует шрифт в системе, но Tk перечисляет
+    семейства при инициализации и может о нём не знать. Тогда весь
+    интерфейс молча уезжает на шрифт по умолчанию с чужими метриками —
+    лучше явно вернуться к Segoe UI.
+    """
+    global UI_FAMILY
+    if UI_FAMILY == "Segoe UI":
+        return UI_FAMILY
+    try:
+        from tkinter import font as tkfont
+        available = {f.lower() for f in tkfont.families(root)}
+        if UI_FAMILY.lower() not in available:
+            UI_FAMILY = "Segoe UI"
+    except Exception:
+        UI_FAMILY = "Segoe UI"
+    return UI_FAMILY
+
+
 # ------------------------------------------------------- DoT Icons
 
 DOT_ICON_CANDIDATES = ["DoT Icons.ttf", "DoTIcons.ttf", "dot_icons.ttf",
