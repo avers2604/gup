@@ -54,23 +54,39 @@ class TestDeterminism:
                 == R.render_single_badge_image(BADGE).tobytes())
 
 
-class TestTemplateHandling:
-    def test_missing_template_is_silent_by_default(self, tmp_path, monkeypatch):
-        """Авто-предпросмотр не должен поднимать исключение из-за отсутствия бланка."""
+class TestBlankIsDrawnInCode:
+    def test_no_external_template_needed(self, tmp_path, monkeypatch):
+        """Бланк строится кодом: отсутствие template.png ничего не ломает."""
         from getpass_core import config
         monkeypatch.setattr(config, "TEMPLATE_FILE", str(tmp_path / "нет.png"))
         R.reset_template_cache()
         img = R.render_pass(PASS, COMMON)
         assert img.size == (R.PASS_W, R.PASS_H)
-        R.reset_template_cache()
+        assert R.template_exists() is True
 
-    def test_missing_template_raises_when_asked(self, tmp_path, monkeypatch):
-        from getpass_core import config
-        monkeypatch.setattr(config, "TEMPLATE_FILE", str(tmp_path / "нет.png"))
-        R.reset_template_cache()
-        with pytest.raises(R.TemplateMissing):
-            R.get_base_template(silent=False)
-        R.reset_template_cache()
+    def test_blank_has_field_frames(self):
+        """На пустом бланке должны быть рамки блоков и подписи полей."""
+        from getpass_core.blank import BOX_PLATE, build_pass_blank
+        blank = build_pass_blank()
+        assert blank.size == (R.PASS_W, R.PASS_H)
+        left, top, right, _bottom = BOX_PLATE
+        mid_x = (left + right) // 2
+        # верхняя граница блока госномера прорисована
+        assert blank.getpixel((mid_x, top))[0] < 120
+
+    def test_blank_is_cached_and_stable(self):
+        from getpass_core.blank import build_pass_blank
+        assert build_pass_blank().tobytes() == build_pass_blank().tobytes()
+
+    def test_number_is_printed_next_to_title(self):
+        """Заголовок «ПРОПУСК №» теперь печатается кодом вместе с номером."""
+        from getpass_core.blank import build_pass_blank
+        blank = build_pass_blank()
+        filled = R.render_pass(PASS, COMMON)
+        band_blank = blank.crop((820, 350, 1700, 420)).convert("L")
+        band_filled = filled.crop((820, 350, 1700, 420)).convert("L")
+        assert band_blank.getextrema()[0] > 200, "на пустом бланке заголовка быть не должно"
+        assert band_filled.getextrema()[0] < 120, "заголовок с номером не напечатан"
 
 
 LONG = "Заместитель начальника отдела транспортной безопасности Смирнов А.В."

@@ -41,6 +41,10 @@ def _install_crash_handler():
 
 def main() -> int:
     _install_crash_handler()
+    # объявить DPI-осведомлённость нужно ДО создания окна Tk, иначе Windows
+    # отрисует интерфейс в 96 dpi и растянет картинку — отсюда «мыло»
+    from getpass_core.dpi import enable_dpi_awareness
+    enable_dpi_awareness()
     from getpass_ui.app import App
     App().run()
     return 0

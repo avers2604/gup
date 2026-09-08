@@ -9,7 +9,8 @@ import os
 
 from PIL import Image, ImageDraw
 
-from . import config
+from .blank import TITLE_BASELINE, TITLE_X, build_pass_blank, load_logo
+from .blank import reset_cache as blank_reset_cache
 from .domain import format_plate_visual
 from .fonts import (get_dot_icons_font, get_echoes_font, get_styled_font,
                     raqm_ok)
@@ -96,51 +97,47 @@ def draw_sheet_brand_icons(draw, x, y, size=48, color_tram="#C62828", color_trol
     return ok1 or ok2
 
 
-_CACHED_BASE_TEMPLATE = None
 _CACHED_BADGE_LOGO = None
 
 
 def template_exists() -> bool:
-    return os.path.exists(config.TEMPLATE_FILE)
+    """Совместимость: бланк больше не зависит от внешнего файла."""
+    return True
 
 
 def get_base_template(silent=True):
-    """Подложка бланка. При отсутствии файла возвращает белый лист.
-
-    silent=True по умолчанию: функция вызывается из авто-предпросмотра, и
-    модальное окно об ошибке там всплывало само собой при каждом запуске.
-    Сообщать об отсутствии шаблона должен интерфейс, один раз.
-    """
-    global _CACHED_BASE_TEMPLATE
-    target_w, target_h = PASS_W, PASS_H
-    if os.path.exists(config.TEMPLATE_FILE):
-        try:
-            if _CACHED_BASE_TEMPLATE is None:
-                im = Image.open(config.TEMPLATE_FILE).convert("RGB")
-                _CACHED_BASE_TEMPLATE = im.resize((target_w, target_h), Image.Resampling.LANCZOS)
-            return _CACHED_BASE_TEMPLATE.copy()
-        except Exception as exc:
-            if not silent:
-                raise TemplateMissing(str(exc)) from exc
-    elif not silent:
-        raise TemplateMissing(config.TEMPLATE_FILE)
-    return Image.new("RGB", (target_w, target_h), "#ffffff")
+    """Подложка пропуска ТС. Строится кодом, файл template.png не нужен."""
+    return build_pass_blank()
 
 
 def get_badge_logo_img(target_width=340):
+    """Фирменный знак для бейджа.
+
+    Возвращает картинку тех же габаритов, что и прежняя вырезка из
+    template.png, чтобы разметка бейджа не сдвинулась.
+    """
     global _CACHED_BADGE_LOGO
-    if _CACHED_BADGE_LOGO is None:
-        base_tpl = get_base_template(silent=True)
-        _CACHED_BADGE_LOGO = base_tpl.crop((60, 65, 890, 260))
-    aspect = _CACHED_BADGE_LOGO.height / _CACHED_BADGE_LOGO.width
-    target_h = int(target_width * aspect)
-    return _CACHED_BADGE_LOGO.resize((target_width, target_h), Image.Resampling.LANCZOS)
+    slot_h = int(target_width * 195 / 830)
+    key = (target_width, slot_h)
+    if _CACHED_BADGE_LOGO and _CACHED_BADGE_LOGO[0] == key:
+        return _CACHED_BADGE_LOGO[1].copy()
+    canvas = Image.new("RGB", (target_width, slot_h), "#FFFFFF")
+    logo = load_logo(target_width)
+    if logo is not None:
+        if logo.height > slot_h:
+            logo = logo.resize(
+                (max(1, int(logo.width * slot_h / logo.height)), slot_h),
+                Image.Resampling.LANCZOS)
+        canvas.paste(logo, ((target_width - logo.width) // 2,
+                            (slot_h - logo.height) // 2), logo)
+    _CACHED_BADGE_LOGO = (key, canvas)
+    return canvas.copy()
 
 
 def reset_template_cache():
-    global _CACHED_BASE_TEMPLATE, _CACHED_BADGE_LOGO
-    _CACHED_BASE_TEMPLATE = None
+    global _CACHED_BADGE_LOGO
     _CACHED_BADGE_LOGO = None
+    blank_reset_cache()
 
 
 def fit_photo_to_box(photo_path, target_w, target_h):
@@ -190,19 +187,24 @@ def render_pass(pass_data, common_data, silent=True):
     img = base_img.copy()
     draw = ImageDraw.Draw(img)
     C_NAVY = "#0A2540"; C_TEXT = "#1B2126"; C_RED = "#C62828"; C_SIGNAL_RED = "#D32F2F"
+    # заголовок печатается вместе с бланком: подложка его больше не содержит
+    num_str = pass_data["num"]
     if common_data.get("is_temporary"):
-        draw.rectangle([500, 345, 1950, 425], fill="#ffffff")
-        font_title = get_styled_font("title", 74)
+        font_title = get_echoes_font(74, bold=True)
         title_str = "ВРЕМЕННЫЙ  ПРОПУСК  №"
-        num_str = pass_data["num"]
         full_str = f"{title_str}  {num_str}"
-        total_w = draw.textlength(full_str, font=font_title)
-        start_x = (target_w - total_w) // 2
+        start_x = (target_w - draw.textlength(full_str, font=font_title)) // 2
         w_title = draw.textlength(title_str + "  ", font=font_title)
-        draw.text((start_x, 410), title_str, fill="#181a30", font=font_title, anchor="ls")
-        draw.text((start_x + w_title, 410), num_str, fill=C_NAVY, font=font_title, anchor="ls")
+        draw.text((start_x, TITLE_BASELINE), title_str, fill="#181a30",
+                  font=font_title, anchor="ls")
+        draw.text((start_x + w_title, TITLE_BASELINE), num_str, fill=C_NAVY,
+                  font=font_title, anchor="ls")
     else:
-        draw.text((1400, 410), pass_data["num"], fill=C_NAVY, font=get_styled_font("title", 76), anchor="ls")
+        font_title = get_echoes_font(76, bold=True)
+        draw.text((TITLE_X, TITLE_BASELINE), "ПРОПУСК  №", fill="#181a30",
+                  font=font_title, anchor="ls")
+        draw.text((1400, TITLE_BASELINE), num_str, fill=C_NAVY,
+                  font=font_title, anchor="ls")
     if pass_data.get("territory"):
         draw_auto_fit_text(draw, pass_data["territory"].upper(), x=1240, y=452, max_w=1400, max_size=36,
                            min_size=20, font_style="geo", fill=C_NAVY, anchor="mm")

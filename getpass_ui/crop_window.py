@@ -8,48 +8,78 @@ from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
 
 from getpass_core.crop import compute_crop_from_state
+from getpass_core.dpi import fit_to_screen, scaled
 
 from .widgets import F
 
+#: желаемый размер области просмотра; ужимается, если экран меньше
 CANVAS_W, CANVAS_H = 700, 700
 #: минимальный зум = 1.0: фото обязано полностью закрывать рамку кадра
 MIN_SCALE, MAX_SCALE = 1.0, 6.0
+#: сколько по высоте занимают панели кнопок и подсказка
+CHROME_H = 250
 
 
-def open_crop_window(parent, image_path, on_apply):
+def open_crop_window(parent, image_path, on_apply, scale=1.0):
     try:
         im = Image.open(image_path).convert("RGB")
     except Exception as exc:
         messagebox.showerror("Ошибка", f"Не удалось открыть фото:\n{exc}", parent=parent)
         return None
-    return CropWindow(parent, im, on_apply)
+    return CropWindow(parent, im, on_apply, scale)
 
 
 class CropWindow:
-    def __init__(self, parent, im, on_apply):
+    def __init__(self, parent, im, on_apply, scale=1.0):
         self.im = im
         self.on_apply = on_apply
         self.orig_w, self.orig_h = im.size
 
         self.win = tk.Toplevel(parent)
         self.win.title("Кадрирование — колесо мыши: масштаб, ЛКМ: перемещение")
-        self.win.geometry("760x920")
-        self.win.minsize(620, 700)
         self.win.transient(parent)
-        self.win.grab_set()
         self.win.configure(bg="#22303C")
 
-        frame_h = int(CANVAS_H * 0.88)
+        # Раньше окно было жёстко 760x920. На ноутбуке с рабочей областью
+        # ниже этого нижняя панель с кнопками «Сохранить и применить»
+        # уезжала под панель задач и добраться до неё было нельзя.
+        want_w = scaled(760, scale)
+        want_h = scaled(CANVAS_H + CHROME_H, scale)
+        win_w, win_h = fit_to_screen(parent, want_w, want_h, margin=100)
+        self.canvas_w = max(320, win_w - scaled(60, scale))
+        self.canvas_h = max(320, win_h - scaled(CHROME_H, scale))
+        self.win.geometry(f"{win_w}x{win_h}")
+        self.win.minsize(min(win_w, scaled(560, scale)), min(win_h, scaled(520, scale)))
+        self._center_on(parent, win_w, win_h)
+
+        frame_h = int(self.canvas_h * 0.88)
         frame_w = int(frame_h * (3 / 4))
-        self.frame_box = ((CANVAS_W - frame_w) // 2, (CANVAS_H - frame_h) // 2,
+        if frame_w > self.canvas_w * 0.92:
+            frame_w = int(self.canvas_w * 0.92)
+            frame_h = int(frame_w * 4 / 3)
+        self.frame_box = ((self.canvas_w - frame_w) // 2, (self.canvas_h - frame_h) // 2,
                           frame_w, frame_h)
         base_scale = max(frame_w / self.orig_w, frame_h / self.orig_h)
         self.state = {"scale": 1.0, "offset_x": 0, "offset_y": 0, "is_dragging": False,
                       "last_x": 0, "last_y": 0, "photo_tk": None, "base_scale": base_scale}
 
         self._build()
+        self.win.grab_set()
         self.redraw()
         self.draw_frame_overlay()
+
+    def _center_on(self, parent, win_w, win_h):
+        """Разместить окно по центру родителя, не вылезая за края экрана."""
+        try:
+            px, py = parent.winfo_rootx(), parent.winfo_rooty()
+            pw, ph = parent.winfo_width(), parent.winfo_height()
+            x = px + max(0, (pw - win_w) // 2)
+            y = py + max(0, (ph - win_h) // 2)
+            x = max(0, min(x, parent.winfo_screenwidth() - win_w))
+            y = max(0, min(y, parent.winfo_screenheight() - win_h))
+            self.win.geometry(f"{win_w}x{win_h}+{x}+{y}")
+        except Exception:
+            pass
 
     def _build(self):
         self.btn_bar = tk.Frame(self.win, bg="#22303C")
@@ -61,7 +91,7 @@ class CropWindow:
                       "Лицо должно быть в красной рамке",
                  bg="#22303C", fg="#E8EEF4", font=F(10)).pack(side="bottom", fill="x",
                                                               pady=(8, 4))
-        self.c = tk.Canvas(self.win, width=CANVAS_W, height=CANVAS_H,
+        self.c = tk.Canvas(self.win, width=self.canvas_w, height=self.canvas_h,
                            bg="#141A20", highlightthickness=0)
         self.c.pack(side="top", fill="both", expand=True, padx=10, pady=(10, 0))
         self.zoom_lbl = tk.Label(self.win, text="Масштаб: 100%", bg="#22303C",
@@ -102,8 +132,8 @@ class CropWindow:
         try:
             disp = self.im.resize((sw, sh), Image.Resampling.LANCZOS)
             self.state["photo_tk"] = ImageTk.PhotoImage(disp)
-            dx = CANVAS_W / 2 + self.state["offset_x"] - sw / 2
-            dy = CANVAS_H / 2 + self.state["offset_y"] - sh / 2
+            dx = self.canvas_w / 2 + self.state["offset_x"] - sw / 2
+            dy = self.canvas_h / 2 + self.state["offset_y"] - sh / 2
             self.c.create_image(dx, dy, image=self.state["photo_tk"],
                                 anchor="nw", tags="photo")
             self.c.tag_lower("photo")
@@ -115,8 +145,8 @@ class CropWindow:
         self.c.delete("frame")
         fx, fy, fw, fh = self.frame_box
         shade = "#0B1116"
-        for box in ((0, 0, CANVAS_W, fy), (0, fy + fh, CANVAS_W, CANVAS_H),
-                    (0, fy, fx, fy + fh), (fx + fw, fy, CANVAS_W, fy + fh)):
+        for box in ((0, 0, self.canvas_w, fy), (0, fy + fh, self.canvas_w, self.canvas_h),
+                    (0, fy, fx, fy + fh), (fx + fw, fy, self.canvas_w, fy + fh)):
             self.c.create_rectangle(*box, fill=shade, stipple="gray50",
                                     outline="", tags="frame")
         self.c.create_rectangle(fx, fy, fx + fw, fy + fh, outline="#E53935",
@@ -126,7 +156,7 @@ class CropWindow:
                                fill="#FFFFFF", width=1, tags="frame")
             self.c.create_line(fx, fy + i * fh / 3, fx + fw, fy + i * fh / 3,
                                fill="#FFFFFF", width=1, tags="frame")
-        self.c.create_text(CANVAS_W // 2, max(14, fy - 18),
+        self.c.create_text(self.canvas_w // 2, max(14, fy - 18),
                            text="ОБЛАСТЬ ФОТО НА БЕЙДЖЕ (3:4)", fill="#FF8A80",
                            font=F(10, True), tags="frame")
 
@@ -162,7 +192,7 @@ class CropWindow:
     def _crop(self):
         return compute_crop_from_state(self.im, self.orig_w, self.orig_h,
                                        self.state, self.frame_box,
-                                       (CANVAS_W, CANVAS_H))
+                                       (self.canvas_w, self.canvas_h))
 
     def save_and_apply(self):
         cropped, box = self._crop()
