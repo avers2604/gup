@@ -21,7 +21,19 @@ else:
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     SCRIPT_DIR = os.path.dirname(SCRIPT_DIR)  # подняться из getpass_core/
 
-FONTS_DIR = os.path.join(SCRIPT_DIR, "fonts")
+#: «fronts» — распространённая опечатка в имени каталога, принимаем оба
+_FONT_DIR_NAMES = ("fonts", "fronts")
+
+
+def _resolve_fonts_dir() -> str:
+    for name in _FONT_DIR_NAMES:
+        candidate = os.path.join(SCRIPT_DIR, name)
+        if os.path.isdir(candidate):
+            return candidate
+    return os.path.join(SCRIPT_DIR, "fonts")
+
+
+FONTS_DIR = _resolve_fonts_dir()
 TEMPLATE_FILE = os.path.join(SCRIPT_DIR, "template.png")
 ICON_FILE = os.path.join(SCRIPT_DIR, "app_icon.ico")
 
