@@ -130,13 +130,6 @@ class App:
         threading.Thread(target=self._load_printers, daemon=True).start()
         self.root.after(300, self._poll_printers)
 
-        tk.Label(bar, text="Оператор:", bg=CLR_BG, font=F(9, True)).pack(side="left",
-                                                                         padx=(14, 4))
-        self.operator_var = tk.StringVar(value=self.settings.get("operator_name", ""))
-        op = ttk.Entry(bar, textvariable=self.operator_var, width=22, font=F(9))
-        op.pack(side="left")
-        op.bind("<FocusOut>", lambda e: self.save_settings())
-
         styled_button(bar, "🧹 ОЧИСТИТЬ ФОРМУ", self.clear_current_form, "#E91E63",
                       font=F(10, True), padx=14, pady=3).pack(side="right", padx=(6, 0))
         styled_button(bar, "♻️ Восстановить", self.restore_database, "#FF9800",
@@ -197,8 +190,6 @@ class App:
                       pady=7, padx=14).pack(side="right")
         row3 = tk.Frame(btn_bar, bg=CLR_BG)
         row3.pack(fill="x", pady=(6, 0))
-        styled_button(row3, "🗄 Внести в базу (без печати)", self.save_pass_to_journal,
-                      "#2E7D32", pady=7, padx=12).pack(side="left", padx=(0, 6))
         styled_button(row3, "📤 Выгрузить таблицу", self.export_pass_journal, "#00838F",
                       pady=7, padx=12).pack(side="left")
 
@@ -382,7 +373,6 @@ class App:
             "print_mode": self.print_mode.get(),
             "last_printer": self.printer_var.get(),
             "auto_preview_target": self.preview_target.get(),
-            "operator_name": self.operator_var.get().strip(),
             **self.badge.collect_settings(),
         }
 
@@ -575,11 +565,9 @@ class App:
 
     def _finish_pass(self, records, next_num):
         """Записать журнал, базу машин и передвинуть нумерацию."""
-        operator = self.operator_var.get().strip()
         for rec in records:
             rec["zone"] = rec.get("territory") or "Основная (Без зоны)"
             rec["driver"] = rec.get("driver_full", "")
-            rec["operator"] = operator
         try:
             PASS_JOURNAL.append_many(records)
         except FileBusy as exc:
@@ -647,47 +635,6 @@ class App:
                 + ("Документ открыт — напечатайте вручную (Ctrl+P).\n\n" if opened else "")
                 + "Считать пропуск выданным и записать в журнал?"):
             self._finish_pass(records, next_num)
-
-    def _collect_pass_records(self):
-        """Записи журнала по заполненной форме, без отрисовки документа."""
-        issue, valid = self._validate_pass_dates()
-        if issue is None:
-            return None
-        if self.p1.is_empty():
-            messagebox.showwarning("Внимание",
-                                   "Заполните «Гос. номер автомобиля» во вкладке «Пропуск №1»!")
-            self.notebook.select(0)
-            self.pass_notebook.select(self.p1.frame)
-            self.p1.plate.focus()
-            return None
-        common = {"issue_date": format_date(issue), "valid_until": format_date(valid),
-                  "otb_post": self.entry_otb_post.get().strip(),
-                  "otb_name": self.entry_otb_name.get().strip(),
-                  "is_temporary": self.is_temp_var.get()}
-        forms = [self.p1]
-        if self.print_mode.get() == "a4" and not self.p2.is_empty():
-            forms.append(self.p2)
-        if not self._check_duplicates(forms):
-            return None
-        records = [dict(form.data(), **common) for form in forms]
-        return records, next_number(forms[-1].data()["num"])
-
-    def save_pass_to_journal(self):
-        """Внести пропуск в базу, не формируя документ."""
-        collected = self._collect_pass_records()
-        if not collected:
-            return
-        records, next_num = collected
-        plates = ", ".join(r["plate"] for r in records)
-        if not messagebox.askyesno(
-                "Внести в базу",
-                f"Записать в журнал без печати ({len(records)} шт.)?\n\n{plates}\n\n"
-                "Номер бланка будет увеличен, форма очищена."):
-            return
-        self._finish_pass(records, next_num)
-        messagebox.showinfo("Готово",
-                            f"Записей внесено: {len(records)}.\n"
-                            f"Следующий номер: {next_num.value}")
 
     def export_pass_journal(self):
         self._export_journal(PASS_JOURNAL, "Журнал_пропусков_ТС")
@@ -806,9 +753,8 @@ class App:
         if not items:
             messagebox.showwarning("Пусто", "В файле нет записей.")
             return
-        operator = self.operator_var.get().strip()
         records = [dict(it, zone=it.get("territory") or "Основная (Без зоны)",
-                        driver=it.get("driver_full", ""), operator=operator)
+                        driver=it.get("driver_full", ""))
                    for it in items]
         pages_total = (len(items) + 1) // 2
         if B.run_batch(self.root, "Массовая печать ТС", items,
@@ -844,8 +790,7 @@ class App:
                 "Ошибка в датах",
                 f"У {len(bad)} записей дата окончания раньше даты выдачи.\n\nПродолжить?"):
             return
-        operator = self.operator_var.get().strip()
-        records = [dict(it, operator=operator) for it in items]
+        records = list(items)
         pages_total = (len(items) + 8) // 9
         B.run_batch(self.root, "Массовая печать бейджей", items,
                     lambda: B.badge_pages(items), pages_total,

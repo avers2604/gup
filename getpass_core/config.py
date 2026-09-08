@@ -189,7 +189,6 @@ DEFAULT_SETTINGS = {
     "badge_print_mode": "card",
     "last_printer": "По умолчанию",
     "auto_preview_target": "1",
-    "operator_name": "",
     "warn_duplicates": True,
 }
 
