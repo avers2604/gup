@@ -157,6 +157,25 @@ def test_empty_plate_is_flagged_invalid_before_print(app, monkeypatch):
     assert "invalid" in app.p1.plate.widget.state()
 
 
+def test_back_side_checkbox_controls_build_documents(app):
+    """Чекбокс «Печатать оборот» должен управлять пятым элементом
+    build_documents() — по умолчанию оборота нет, при включении он того
+    же размера, что и лицевая сторона."""
+    app.notebook.select(0)
+    app.print_mode.set("a5")
+    app.p1.plate_var.set("о777тв198")
+    app.root.update()
+
+    app.print_back_var.set(False)
+    document, back_document, prefix, records, next_num = app.build_documents()
+    assert back_document is None
+
+    app.print_back_var.set(True)
+    document, back_document, prefix, records, next_num = app.build_documents()
+    assert back_document is not None
+    assert back_document.size == document.size
+
+
 def test_journal_windows_open(app):
     app.open_pass_journal()
     app.open_badge_journal()

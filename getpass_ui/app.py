@@ -318,6 +318,10 @@ class App:
                 "a4", command=self.update_tab_states).pack(anchor="w")
         th.radio(b, "Лист А5 — один пропуск (вкладка №2 блокируется)", self.print_mode,
                 "a5", command=self.update_tab_states).pack(anchor="w")
+        self.print_back_var = tk.BooleanVar(
+            value=self.settings.get("print_pass_back", False))
+        th.check(b, "Печатать оборот (правила пользования пропуском)",
+                self.print_back_var).pack(anchor="w", pady=(th.sp(2), 0))
         card.fit()
 
     def _build_preview_panel(self, paned):
@@ -427,6 +431,7 @@ class App:
             "valid_until": self.entry_valid.get().strip() or self.settings.get("valid_until"),
             "is_temporary_car": self.is_temp_var.get(),
             "print_mode": self.print_mode.get(),
+            "print_pass_back": self.print_back_var.get(),
             "last_printer": self.printer_var.get(),
             "auto_preview_target": self.preview_target.get(),
             "window_geometry": f"{self.root.winfo_width()}x{self.root.winfo_height()}",
@@ -624,7 +629,14 @@ class App:
             source_num = p1["num"]
 
         document = R.build_pass_a4_sheet(img1, img2) if mode == "a4" else img1
-        return document, prefix, records, next_number(source_num)
+        back_document = None
+        if self.print_back_var.get():
+            back = R.render_pass_back()
+            # тот же лист А4 разрезается на два пропуска — оборот должен
+            # совпасть с обеими половинами, поэтому дублируем его так же,
+            # как переднюю сторону в build_pass_a4_sheet
+            back_document = R.build_pass_a4_sheet(back, back) if mode == "a4" else back
+        return document, back_document, prefix, records, next_number(source_num)
 
     def _finish_pass(self, records, next_num):
         """Записать журнал, базу машин и передвинуть нумерацию."""
@@ -656,15 +668,24 @@ class App:
         built = self.build_documents()
         if not built:
             return
-        document, prefix, records, next_num = built
+        document, back_document, prefix, records, next_num = built
         path = filedialog.asksaveasfilename(
             defaultextension=".pdf",
             filetypes=[("PDF Документ (для печати)", "*.pdf"), ("Изображение JPEG", "*.jpg")],
             initialfile=f"{prefix}.pdf")
         if not path:
             return
+        is_pdf = os.path.splitext(path)[1].lower() == ".pdf"
         try:
-            printing.save_document(document, path)
+            if back_document is not None and is_pdf:
+                printing.save_pdf_pages([document, back_document], path)
+            else:
+                printing.save_document(document, path)
+                if back_document is not None:
+                    messagebox.showinfo(
+                        "Оборот не сохранён",
+                        "Оборотная сторона поддерживается только при сохранении в PDF.\n"
+                        "Сохранена только лицевая сторона.")
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось сохранить файл:\n{exc}")
             return
@@ -676,8 +697,13 @@ class App:
         built = self.build_documents()
         if not built:
             return
-        document, prefix, records, next_num = built
-        ok, err = printing.send_image_to_printer(document, self.printer_var.get())
+        document, back_document, prefix, records, next_num = built
+        if back_document is not None:
+            ok, err = printing.print_pass_two_sided(
+                document, back_document, self.printer_var.get(),
+                confirm_flip=self._confirm_flip_for_back_side)
+        else:
+            ok, err = printing.send_image_to_printer(document, self.printer_var.get())
         if ok:
             # журнал и нумерация двигаются ТОЛЬКО после успешной отправки:
             # раньше при отказе принтера номер сгорал, а в журнале оставалась
@@ -687,7 +713,10 @@ class App:
             return
         temp_pdf = os.path.join(config.DATA_DIR, f"_print_{prefix}.pdf")
         try:
-            printing.save_document(document, temp_pdf)
+            if back_document is not None:
+                printing.save_pdf_pages([document, back_document], temp_pdf)
+            else:
+                printing.save_document(document, temp_pdf)
             os.startfile(temp_pdf)  # noqa: Windows only
             opened = True
         except Exception:
@@ -698,6 +727,16 @@ class App:
                 + ("Документ открыт — напечатайте вручную (Ctrl+P).\n\n" if opened else "")
                 + "Считать пропуск выданным и записать в журнал?"):
             self._finish_pass(records, next_num)
+
+    def _confirm_flip_for_back_side(self) -> bool:
+        """Принтер без автодуплекса: лицевая сторона уже напечатана —
+        спросить, готов ли пользователь переложить лист для печати оборота."""
+        return messagebox.askokcancel(
+            "Печать оборотной стороны",
+            "Лицевая сторона напечатана.\n\n"
+            "Переверните лист в лотке принтера (эта модель не поддерживает "
+            "автоматическую двухстороннюю печать) и нажмите «ОК», чтобы "
+            "напечатать оборот с правилами пользования пропуском.")
 
     def export_pass_journal(self):
         self._export_journal(PASS_JOURNAL, "Журнал_пропусков_ТС")

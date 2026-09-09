@@ -228,6 +228,105 @@ def render_pass(pass_data, common_data, silent=True):
     return img
 
 
+PASS_BACK_RULES = (
+    "1. Скорость не более 10 км/ч, уступать дорогу трамваям. Парковка на газонах, "
+    "пожарных проездах, над люками и под контактной сетью запрещена.",
+    "2. Предоставлять ТС для визуального осмотра (проверки) (салон, багажник) охране "
+    "(Охранной организации) и Службе транспортной безопасности при въезде и выезде. "
+    "Вывоз материальных ценностей — только по сопроводительным документам.",
+    "3. Не передавать пропуск третьим лицам. В случае выявления нарушения пропуск "
+    "изымается уполномоченным представителем администрации ПТО «Шаврова» на основании "
+    "Акта фиксации, составленного сотрудником охранной организации. Сдать пропуск на "
+    "КПП №1 (въезд с Комендантского пр.) при увольнении, смене гос. номера или окончании "
+    "срока действия.",
+    "4. Мне разъяснено, что парковка осуществляется безвозмездно и НЕ является договором "
+    "хранения (ст. 886 ГК РФ). СПб ГУП «Горэлектротранс» не несёт материальной "
+    "ответственности за сохранность ТС.",
+)
+
+
+def _wrap_text(draw, text, font, max_w):
+    """Разбить строку на строки по словам под ширину max_w."""
+    words = text.split(" ")
+    lines, cur = [], ""
+    for word in words:
+        trial = f"{cur} {word}".strip()
+        if draw.textlength(trial, font=font) <= max_w:
+            cur = trial
+        else:
+            if cur:
+                lines.append(cur)
+            cur = word
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _draw_wrapped_paragraphs(draw, paragraphs, x, y_top, max_w, max_h, fill,
+                             max_size=64, min_size=20, style="light",
+                             line_height_ratio=1.32, para_gap_ratio=0.55):
+    """Подобрать наибольший кегль, при котором все абзацы целиком влезают
+    в max_h, и отрисовать их. Кегль опускается до min_size шагом по 2px —
+    текст правил заранее не подгонялся под макет вручную, размер должен
+    сам подстроиться под то, сколько реально текста передали."""
+    font = lines_by_para = line_h = para_gap = total_h = None
+    for size in range(max_size, min_size - 1, -2):
+        font = get_styled_font(style, size)
+        line_h = int(size * line_height_ratio)
+        para_gap = int(line_h * para_gap_ratio)
+        lines_by_para = [_wrap_text(draw, p, font, max_w) for p in paragraphs]
+        total_h = sum(len(lines) for lines in lines_by_para) * line_h \
+            + para_gap * max(0, len(paragraphs) - 1)
+        if total_h <= max_h:
+            break
+    # текста обычно меньше, чем помещается в рамку — центрируем блок по
+    # высоте, а не прижимаем к верхнему краю с пустотой снизу
+    y = y_top + max(0, (max_h - total_h) // 2)
+    for lines in lines_by_para:
+        for line in lines:
+            draw.text((x, y), line, fill=fill, font=font, anchor="la")
+            y += line_h
+        y += para_gap
+
+
+_CACHED_PASS_BACK = None
+
+
+def render_pass_back():
+    """Обратная сторона пропуска ТС: правила пользования (фиксированный
+    текст). Не зависит от данных конкретного пропуска, поэтому готовое
+    изображение кешируется — печать не должна перерисовывать его заново
+    на каждый экземпляр при массовой печати."""
+    global _CACHED_PASS_BACK
+    if _CACHED_PASS_BACK is not None:
+        return _CACHED_PASS_BACK.copy()
+    img = Image.new("RGB", (PASS_W, PASS_H), "#FFFFFF")
+    draw = ImageDraw.Draw(img)
+    C_NAVY = "#0A2540"; C_TEXT = "#1B2126"
+    margin = 70
+    box = (margin, margin, PASS_W - margin, PASS_H - margin)
+    draw.rounded_rectangle(box, radius=22, outline=C_NAVY, width=3)
+
+    pad_x, pad_y = 56, 44
+    inner_x0, inner_y0 = box[0] + pad_x, box[1] + pad_y
+    inner_x1, inner_y1 = box[2] - pad_x, box[3] - pad_y
+
+    title = "ПРАВИЛА ПОЛЬЗОВАНИЯ ПРОПУСКОМ"
+    title_font = get_styled_font("title", 52)
+    draw.text(((inner_x0 + inner_x1) // 2, inner_y0), title, fill=C_NAVY,
+              font=title_font, anchor="ma")
+    title_h = draw.textbbox((0, 0), title, font=title_font)[3]
+    rule_y = inner_y0 + title_h + 26
+    draw.line([(inner_x0, rule_y), (inner_x1, rule_y)], fill="#CBD2D9", width=2)
+
+    text_top = rule_y + 30
+    _draw_wrapped_paragraphs(draw, PASS_BACK_RULES, inner_x0, text_top,
+                             inner_x1 - inner_x0, inner_y1 - text_top, C_TEXT)
+
+    _CACHED_PASS_BACK = img
+    return img.copy()
+
+
 def build_pass_a4_sheet(img1, img2=None):
     """Лист А4 с одним или двумя пропусками и линией разреза."""
     sheet = Image.new("RGB", (A4_W, A4_H), "white")
