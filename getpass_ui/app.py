@@ -43,8 +43,9 @@ class App:
         self.root.title("СПб ГУП «Горэлектротранс» — Система выпуска пропусков и бейджей")
         # масштаб экрана: на 125/150% интерфейс должен стать крупнее, а не мыльнее
         self.scale = apply_scaling(self.root)
-        win_w, win_h = fit_to_screen(self.root, scaled(1500, self.scale),
-                                     scaled(920, self.scale))
+        default_w, default_h = scaled(1500, self.scale), scaled(920, self.scale)
+        saved_w, saved_h = self._parse_geometry(self.settings.get("window_geometry", ""))
+        win_w, win_h = fit_to_screen(self.root, saved_w or default_w, saved_h or default_h)
         self.root.geometry(f"{win_w}x{win_h}")
         self.root.minsize(min(win_w, scaled(1000, self.scale)),
                           min(win_h, scaled(660, self.scale)))
@@ -82,7 +83,25 @@ class App:
         self.update_tab_states()
         self.root.after(200, self._startup_checks)
         self.root.after(250, self._initial_previews)
-        self.p1.plate.focus()
+        active_tab = self.settings.get("active_tab", 0)
+        if active_tab in (0, 1):
+            try:
+                self.notebook.select(active_tab)
+            except Exception:
+                pass
+        if self.notebook.index(self.notebook.select()) == 0:
+            self.p1.plate.focus()
+
+    @staticmethod
+    def _parse_geometry(spec: str) -> tuple[int, int]:
+        """Разобрать сохранённые размеры окна вида «1500x920». Пустая или
+        битая строка — обе стороны 0, вызывающий код подставит значение
+        по умолчанию."""
+        try:
+            width, _, height = spec.partition("x")
+            return int(width), int(height)
+        except (ValueError, AttributeError):
+            return 0, 0
 
     # =============================================== оформление
 
@@ -211,11 +230,13 @@ class App:
         ttk.Button(row2, text="Журнал ТС", command=self.open_pass_journal,
                   style="Ghost.TButton").pack(side="right")
 
-        paned = tk.PanedWindow(container, orient="horizontal", bg=th.c("ground"),
-                               sashwidth=th.px(6), sashrelief="flat", borderwidth=0)
+        self.pass_paned = tk.PanedWindow(container, orient="horizontal", bg=th.c("ground"),
+                                         sashwidth=th.px(6), sashrelief="flat", borderwidth=0)
+        paned = self.pass_paned
         paned.pack(side="top", fill="both", expand=True)
         left = tk.Frame(paned, bg=th.c("ground"))
-        paned.add(left, minsize=scaled(440, self.scale), width=scaled(700, self.scale))
+        left_width = int(self.settings.get("pass_paned_width") or 0) or scaled(700, self.scale)
+        paned.add(left, minsize=scaled(440, self.scale), width=left_width)
         _, _, inner = make_scrollable(left, th.c("ground"))
 
         car_card = Card(inner, th)
@@ -388,6 +409,10 @@ class App:
     # =============================================== настройки
 
     def collect_settings(self):
+        try:
+            pass_paned_width = self.pass_paned.sash_coord(0)[0]
+        except Exception:
+            pass_paned_width = self.settings.get("pass_paned_width", 0)
         return {
             "last_pass_num": self.p1.get_number() or self.settings.get("last_pass_num"),
             "territory": self.p1.territory.get().strip() or self.settings.get("territory"),
@@ -398,6 +423,9 @@ class App:
             "print_mode": self.print_mode.get(),
             "last_printer": self.printer_var.get(),
             "auto_preview_target": self.preview_target.get(),
+            "window_geometry": f"{self.root.winfo_width()}x{self.root.winfo_height()}",
+            "active_tab": self.notebook.index(self.notebook.select()),
+            "pass_paned_width": pass_paned_width,
             **self.badge.collect_settings(),
         }
 

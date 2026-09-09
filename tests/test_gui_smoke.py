@@ -173,6 +173,41 @@ def test_settings_saved_on_close(app, monkeypatch):
     assert config.load_settings()["otb_name"] == "Петров И.С."
 
 
+def test_paned_width_is_captured_on_close(app, monkeypatch):
+    """Регрессия: ширина левой панели никогда не сохранялась — окно всегда
+    открывалось с шириной панелей по умолчанию, даже если пользователь
+    подвинул разделитель."""
+    from tkinter import messagebox
+    monkeypatch.setattr(messagebox, "askokcancel", lambda *a, **k: True)
+    app.root.update()
+    app.on_closing()
+    from getpass_core import config
+    assert config.load_settings()["pass_paned_width"] > 0
+
+
+def test_window_geometry_and_active_tab_persist_across_restart(app, monkeypatch):
+    """Регрессия: размер окна и выбранная вкладка не запоминались — каждый
+    перезапуск начинался с окна и вкладки по умолчанию."""
+    from tkinter import messagebox
+
+    from getpass_ui.app import App
+    monkeypatch.setattr(messagebox, "askokcancel", lambda *a, **k: True)
+    app.root.geometry("1200x800")
+    app.root.update()
+    app.notebook.select(1)
+    app.root.update()
+    app.on_closing()
+
+    second = App()
+    try:
+        second.root.update()
+        assert second.notebook.index(second.notebook.select()) == 1
+        width, height = (int(v) for v in second.root.geometry().split("+")[0].split("x"))
+        assert (width, height) == (1200, 800)
+    finally:
+        second.root.destroy()
+
+
 def _really_visible(widget, min_w=40, min_h=12):
     """Виден ли виджет фактически.
 

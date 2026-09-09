@@ -39,11 +39,13 @@ class BadgePanel:
         self.app = None          # проставляется владельцем для кнопок реестров
 
         self._build_buttons()
-        paned = tk.PanedWindow(self.container, orient="horizontal", bg=th.c("ground"),
-                               sashwidth=th.px(6), sashrelief="flat", borderwidth=0)
+        self.paned = tk.PanedWindow(self.container, orient="horizontal", bg=th.c("ground"),
+                                    sashwidth=th.px(6), sashrelief="flat", borderwidth=0)
+        paned = self.paned
         paned.pack(side="top", fill="both", expand=True)
         left = tk.Frame(paned, bg=th.c("ground"))
-        paned.add(left, minsize=scaled(420, th.scale), width=scaled(680, th.scale))
+        left_width = int(settings.get("badge_paned_width") or 0) or scaled(680, th.scale)
+        paned.add(left, minsize=scaled(420, th.scale), width=left_width)
         _, _, self.left_panel = make_scrollable(left, th.c("ground"))
         self._build_form()
         self._build_preview(paned)
@@ -379,10 +381,15 @@ class BadgePanel:
     # ---------------------------------------------------------- прочее
 
     def collect_settings(self):
+        try:
+            paned_width = self.paned.sash_coord(0)[0]
+        except Exception:
+            paned_width = self.settings.get("badge_paned_width", 0)
         return {"badge_park": self.park.get().strip(),
                 "badge_tab_num": self.tab_num.get().strip()
                 or self.settings.get("badge_tab_num", "01035"),
-                "badge_print_mode": self.print_mode.get()}
+                "badge_print_mode": self.print_mode.get(),
+                "badge_paned_width": paned_width}
 
     def clear_form(self, confirm=False):
         if confirm and not messagebox.askyesno(
