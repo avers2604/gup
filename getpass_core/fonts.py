@@ -3,12 +3,9 @@ from __future__ import annotations
 
 import ctypes
 import os
-
 from PIL import ImageFont
 
 from . import config
-
-# ------------------------------------------------- шрифты бланков
 
 _FONT_CACHE: dict = {}
 
@@ -21,7 +18,6 @@ _CANDIDATES = {
     "light": ["segoeui.ttf", "calibri.ttf", "LiberationSans-Regular.ttf", "arial.ttf"],
 }
 
-#: True, если ни один TTF не нашёлся и бланки печатаются дефолтным шрифтом
 FONTS_MISSING = False
 
 
@@ -39,8 +35,6 @@ def get_styled_font(style_type: str, size: int):
         except IOError:
             continue
     if font is None:
-        # load_default игнорирует размер: весь бланк уедет в мелкий кегль,
-        # поэтому факт фиксируем, чтобы интерфейс мог предупредить оператора.
         FONTS_MISSING = True
         try:
             font = ImageFont.load_default(size)
@@ -54,26 +48,24 @@ def fonts_are_missing() -> bool:
     return FONTS_MISSING
 
 
-# ------------------------------------------------------ Echoes Sans
-
 _ECHOES_REGULAR = None
 _ECHOES_BOLD = None
 _ECHOES_FOUND = False
 UI_FAMILY = "Segoe UI"
 
-# Брендбук-шрифт интерфейса и реестров. Порядок значим: что найдено первым,
-# то и применяется. Echoes Sans имеет приоритет, Moscow Sans — запасной вариант.
-ECHOES_NAMES_REG = ["echoes sans.ttf", "echoessans.ttf", "echoes_sans.ttf", "echoessans-regular.ttf",
-                    "echoes sans regular.ttf", "echoessansregular.ttf", "echoessans-regular.otf",
-                    "echoes sans.otf",
-                    "moscowsans-regular.otf", "moscowsans-regular.ttf", "moscowsans.otf",
-                    "moscow sans regular.otf", "moscow sans.otf"]
-ECHOES_NAMES_BOLD = ["echoes sans bold.ttf", "echoessans-bold.ttf", "echoessansbold.ttf",
-                     "echoes_sans_bold.ttf", "echoessans-semibold.ttf", "echoes sans semibold.ttf",
-                     "moscowsansextrabold.otf", "moscowsans-bold.otf", "moscowsansbold.otf",
-                     "moscow sans bold.otf"]
+ECHOES_NAMES_REG = [
+    "echoes sans.ttf", "echoessans.ttf", "echoes_sans.ttf", "echoessans-regular.ttf",
+    "echoes sans regular.ttf", "echoessansregular.ttf", "echoessans-regular.otf",
+    "echoes sans.otf", "moscowsans-regular.otf", "moscowsans-regular.ttf", "moscowsans.otf",
+    "moscow sans regular.otf", "moscow sans.otf"
+]
+ECHOES_NAMES_BOLD = [
+    "echoes sans bold.ttf", "echoessans-bold.ttf", "echoessansbold.ttf",
+    "echoes_sans_bold.ttf", "echoessans-semibold.ttf", "echoes sans semibold.ttf",
+    "moscowsansextrabold.otf", "moscowsans-bold.otf", "moscowsansbold.otf",
+    "moscow sans bold.otf"
+]
 
-#: по этим подстрокам распознаём брендбук-шрифт с произвольным именем файла
 BRAND_TOKENS = ("echoes", "moscowsans", "moscow sans")
 
 
@@ -82,6 +74,7 @@ def find_echoes_font() -> None:
     if _ECHOES_FOUND:
         return
     _ECHOES_FOUND = True
+
     search_dirs = [config.SCRIPT_DIR, config.FONTS_DIR]
     if os.name == "nt":
         windir = os.environ.get("WINDIR", r"C:\Windows")
@@ -89,6 +82,7 @@ def find_echoes_font() -> None:
         local = os.environ.get("LOCALAPPDATA", "")
         if local:
             search_dirs.append(os.path.join(local, "Microsoft", "Windows", "Fonts"))
+
     for d in search_dirs:
         if not d or not os.path.isdir(d):
             continue
@@ -97,12 +91,14 @@ def find_echoes_font() -> None:
         except Exception:
             continue
         low_map = {f.lower(): f for f in files}
+
         for name in ECHOES_NAMES_REG:
             if name in low_map and _ECHOES_REGULAR is None:
                 _ECHOES_REGULAR = os.path.join(d, low_map[name])
         for name in ECHOES_NAMES_BOLD:
             if name in low_map and _ECHOES_BOLD is None:
                 _ECHOES_BOLD = os.path.join(d, low_map[name])
+
         for f in files:
             fl = f.lower()
             if any(tok in fl for tok in BRAND_TOKENS) and fl.endswith((".ttf", ".otf")):
@@ -112,7 +108,8 @@ def find_echoes_font() -> None:
                     _ECHOES_BOLD = full
                 elif not is_bold and _ECHOES_REGULAR is None:
                     _ECHOES_REGULAR = full
-        if _ECHOES_REGULAR:
+
+        if _ECHOES_REGULAR and _ECHOES_BOLD:
             break
 
 
@@ -150,13 +147,6 @@ def ui_family() -> str:
 
 
 def verify_ui_family(root) -> str:
-    """Проверить, что Tk действительно видит брендбук-шрифт.
-
-    AddFontResourceW регистрирует шрифт в системе, но Tk перечисляет
-    семейства при инициализации и может о нём не знать. Тогда весь
-    интерфейс молча уезжает на шрифт по умолчанию с чужими метриками —
-    лучше явно вернуться к Segoe UI.
-    """
     global UI_FAMILY
     if UI_FAMILY == "Segoe UI":
         return UI_FAMILY
@@ -170,12 +160,11 @@ def verify_ui_family(root) -> str:
     return UI_FAMILY
 
 
-# ------------------------------------------------------- DoT Icons
-
-DOT_ICON_CANDIDATES = ["dot icons.ttf", "dot icons.otf", "doticons.ttf", "doticons.otf",
-                       "dot_icons.ttf", "dot_icons.otf",
-                       "doticons-regular.ttf", "doticons-regular.otf",
-                       "dot icons regular.ttf", "dot icons regular.otf"]
+DOT_ICON_CANDIDATES = [
+    "dot icons.ttf", "dot icons.otf", "doticons.ttf", "doticons.otf",
+    "dot_icons.ttf", "dot_icons.otf", "doticons-regular.ttf", "doticons-regular.otf",
+    "dot icons regular.ttf", "dot icons regular.otf"
+]
 _DOT_ICON_PATH = None
 _DOT_ICON_PATH_SEARCHED = False
 _DOT_FONT_CACHE: dict = {}
@@ -187,6 +176,7 @@ def find_dot_icons_font():
     if _DOT_ICON_PATH_SEARCHED:
         return _DOT_ICON_PATH
     _DOT_ICON_PATH_SEARCHED = True
+
     for d in (config.FONTS_DIR, config.SCRIPT_DIR):
         if not d or not os.path.isdir(d):
             continue
@@ -199,8 +189,6 @@ def find_dot_icons_font():
             if name in low:
                 _DOT_ICON_PATH = os.path.join(d, low[name])
                 return _DOT_ICON_PATH
-        # запасной поиск по подстроке: сортируем, чтобы выбор не зависел от
-        # порядка файлов в каталоге (иначе берётся случайная копия шрифта)
         for f in sorted(files):
             fl = f.lower()
             if "dot" in fl and "icon" in fl and fl.endswith((".ttf", ".otf")):
@@ -221,12 +209,6 @@ def raqm_ok() -> bool:
 
 
 def _raqm_layout():
-    """Константа движка RAQM, переехавшая между версиями Pillow.
-
-    До Pillow 10 это ImageFont.LAYOUT_RAQM, начиная с 9.2 — ImageFont.Layout.RAQM.
-    Обращение к исчезнувшему имени роняло генерацию реестров с AttributeError,
-    как только шрифт пиктограмм оказывался найден.
-    """
     layout = getattr(ImageFont, "Layout", None)
     if layout is not None and hasattr(layout, "RAQM"):
         return layout.RAQM

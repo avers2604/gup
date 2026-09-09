@@ -1,41 +1,47 @@
-"""Пути, каталог данных и настройки.
-
-Каталог данных выбирается так, чтобы программа работала и при установке
-в Program Files, где запись рядом с exe запрещена.
-"""
+"""Пути, каталог данных и настройки."""
 from __future__ import annotations
 
 import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from datetime import datetime
 
 APP_NAME = "GET-Passes"
 
+# Базовый каталог приложения
 if getattr(sys, "frozen", False):
     SCRIPT_DIR = os.path.dirname(sys.executable)
+    # В режиме PyInstaller --onefile ресурсы распаковываются в _MEIPASS
+    BUNDLE_DIR = getattr(sys, "_MEIPASS", SCRIPT_DIR)
 else:
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     SCRIPT_DIR = os.path.dirname(SCRIPT_DIR)  # подняться из getpass_core/
+    BUNDLE_DIR = SCRIPT_DIR
 
-#: «fronts» — распространённая опечатка в имени каталога, принимаем оба
 _FONT_DIR_NAMES = ("fonts", "fronts")
 
 
 def _resolve_fonts_dir() -> str:
-    for name in _FONT_DIR_NAMES:
-        candidate = os.path.join(SCRIPT_DIR, name)
-        if os.path.isdir(candidate):
-            return candidate
+    for base in (BUNDLE_DIR, SCRIPT_DIR):
+        for name in _FONT_DIR_NAMES:
+            candidate = os.path.join(base, name)
+            if os.path.isdir(candidate):
+                return candidate
     return os.path.join(SCRIPT_DIR, "fonts")
 
 
 FONTS_DIR = _resolve_fonts_dir()
-TEMPLATE_FILE = os.path.join(SCRIPT_DIR, "template.png")
-ICON_FILE = os.path.join(SCRIPT_DIR, "app_icon.ico")
+TEMPLATE_FILE = os.path.join(BUNDLE_DIR, "template.png")
+if not os.path.exists(TEMPLATE_FILE):
+    TEMPLATE_FILE = os.path.join(SCRIPT_DIR, "template.png")
+
+ICON_FILE = os.path.join(BUNDLE_DIR, "app_icon.ico")
+if not os.path.exists(ICON_FILE):
+    ICON_FILE = os.path.join(SCRIPT_DIR, "app_icon.ico")
 
 
 def _is_writable(path: str) -> bool:
@@ -63,13 +69,6 @@ _LEGACY_NAMES = (
 
 
 def resolve_data_dir() -> str:
-    """Каталог для журналов и настроек.
-
-    1. Если рядом с программой есть каталог data/ — используем его.
-    2. Если рядом с программой лежат журналы старой версии и туда можно
-       писать — остаёмся там (не ломаем существующие установки).
-    3. Иначе — %LOCALAPPDATA%/GET-Passes, с переносом старых файлов.
-    """
     local_data = os.path.join(SCRIPT_DIR, "data")
     if os.path.isdir(local_data) and _is_writable(local_data):
         return local_data
@@ -103,11 +102,7 @@ def resolve_data_dir() -> str:
 
 DATA_DIR = resolve_data_dir()
 PHOTO_DIR = os.path.join(DATA_DIR, "photos")
-
 CONFIG_FILE = os.path.join(DATA_DIR, "settings.json")
-#: журналы теперь хранятся в SQLite; CSV/XLSX-пути остаются только как
-#: источник для одноразовой миграции старых установок и как файл,
-#: который перегенерируется по кнопке «Открыть в Excel»
 DB_FILE = os.path.join(DATA_DIR, "gup.sqlite3")
 LOG_CSV_FILE = os.path.join(DATA_DIR, "журнал_пропусков.csv")
 LOG_XLSX_FILE = os.path.join(DATA_DIR, "журнал_пропусков.xlsx")
@@ -118,32 +113,28 @@ CRASH_LOG_FILE = os.path.join(DATA_DIR, "crash.log")
 
 
 def harden_data_dir() -> bool:
-    """Ограничить доступ к каталогу данных текущим пользователем.
-
-    В каталоге лежат ФИО, телефоны, госномера и фотографии — персональные
-    данные. Делается один раз, best-effort: неуспех не мешает работе.
-    """
     marker = os.path.join(DATA_DIR, ".acl_applied")
     if os.path.exists(marker):
         return True
     ok = False
     try:
         if os.name == "nt":
-            import subprocess
             user = os.environ.get("USERNAME", "")
             if user:
-                subprocess.run(
+                # *S-1-5-32-544 — универсальный SID группы встроенных Администраторов
+                res = subprocess.run(
                     ["icacls", DATA_DIR, "/inheritance:r",
                      "/grant:r", f"{user}:(OI)(CI)F",
-                     "/grant:r", "Администраторы:(OI)(CI)F"],
+                     "/grant:r", "*S-1-5-32-544:(OI)(CI)F"],
                     creationflags=0x08000000, capture_output=True, timeout=15,
                 )
-                ok = True
+                ok = (res.returncode == 0)
         else:
             os.chmod(DATA_DIR, 0o700)
             ok = True
     except Exception:
         ok = False
+
     if ok:
         try:
             with open(marker, "w", encoding="utf-8") as f:
@@ -153,8 +144,6 @@ def harden_data_dir() -> bool:
     return ok
 
 
-# --------------------------------------------------------- crash.log
-
 _PII_PATTERNS = (
     (re.compile(r"(\+7|8)[\s(\-]*\d{3}[\s)\-]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}"), "<телефон>"),
     (re.compile(r"\b[А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\."), "<ФИО>"),
@@ -163,7 +152,6 @@ _PII_PATTERNS = (
 
 
 def redact_pii(text: str) -> str:
-    """Вычистить персональные данные из текста аварийного отчёта."""
     for pattern, repl in _PII_PATTERNS:
         text = pattern.sub(repl, text)
     return text
@@ -178,8 +166,6 @@ def write_crash_log(err_msg: str) -> None:
     except Exception:
         pass
 
-
-# --------------------------------------------------------- настройки
 
 DEFAULT_SETTINGS = {
     "last_pass_num": "001-26",
@@ -220,7 +206,6 @@ def load_settings() -> dict:
 
 
 def save_settings(values: dict) -> bool:
-    """Записать настройки. Принимает готовый словарь — без связи с виджетами."""
     payload = {k: v for k, v in values.items() if k in DEFAULT_SETTINGS}
     try:
         os.makedirs(DATA_DIR, exist_ok=True)

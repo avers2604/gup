@@ -1,13 +1,4 @@
-"""Потоковая запись многостраничного PDF.
-
-Pillow при save_all собирает СПИСОК всех страниц до начала кодирования
-(PdfImagePlugin строит `ims`), поэтому лист А4 300 dpi × N страниц целиком
-лежит в памяти: 25 листов — около 840 МБ. Здесь страницы кодируются и
-пишутся по одной, память не зависит от их числа.
-
-Формат намеренно минимальный: каждая страница — одно изображение
-DCTDecode (JPEG), ровно как это делает Pillow для RGB.
-"""
+"""Потоковая запись многостраничного PDF."""
 from __future__ import annotations
 
 import io
@@ -42,7 +33,6 @@ class _Writer:
 
 
 def _encode_page(image, quality: int):
-    """Закодировать страницу. Возвращает (данные, фильтр, цветовое пространство)."""
     mode = image.mode
     if mode not in ("RGB", "L"):
         image = image.convert("RGB")
@@ -54,9 +44,8 @@ def _encode_page(image, quality: int):
 
 
 def write_pdf(pages, filepath: str, dpi: int = 300, quality: int = 88) -> int:
-    """Записать страницы в PDF по одной. Возвращает число страниц."""
     page_refs: list[int] = []
-    next_num = 3                      # 1 — каталог, 2 — дерево страниц
+    next_num = 3
     count = 0
 
     with open(filepath, "wb") as fp:
@@ -79,7 +68,8 @@ def write_pdf(pages, filepath: str, dpi: int = 300, quality: int = 88) -> int:
                 img_num,
                 f"/Type /XObject /Subtype /Image /Width {width} /Height {height} "
                 f"/ColorSpace {colorspace} /BitsPerComponent 8 /Filter {filt}",
-                data)
+                data,
+            )
 
             content = f"q\n{w_pt:.4f} 0 0 {h_pt:.4f} 0 0 cm\n/Im0 Do\nQ\n".encode("ascii")
             packed = zlib.compress(content)
@@ -91,12 +81,11 @@ def write_pdf(pages, filepath: str, dpi: int = 300, quality: int = 88) -> int:
                 f"/MediaBox [0 0 {w_pt:.4f} {h_pt:.4f}] "
                 f"/Resources << /XObject << /Im0 {img_num} 0 R >> "
                 f"/ProcSet [/PDF /ImageC /ImageB] >> "
-                f"/Contents {content_num} 0 R >>\n".encode("ascii"))
-            w.end_object()
+                f"/Contents {content_num} 0 R >>\n".encode("ascii"),
+            )
 
             page_refs.append(page_num)
             count += 1
-            # страница больше не нужна: освобождаем буфер немедленно
             try:
                 image.close()
             except Exception:
@@ -117,6 +106,8 @@ def write_pdf(pages, filepath: str, dpi: int = 300, quality: int = 88) -> int:
         w.write(b"0000000000 65535 f \n")
         for num in range(1, max_num + 1):
             w.write(f"{w.offsets[num]:010d} 00000 n \n".encode("ascii"))
-        w.write(f"trailer\n<< /Size {max_num + 1} /Root 1 0 R >>\n"
-                f"startxref\n{xref_pos}\n%%EOF\n".encode("ascii"))
+        w.write(
+            f"trailer\n<< /Size {max_num + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_pos}\n%%EOF\n".encode("ascii"),
+        )
     return count

@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from PIL import Image
 
 from .pdfwriter import write_pdf
 
@@ -20,7 +21,6 @@ def _ps(args, timeout):
 
 
 def get_available_printers() -> list[str]:
-    """Список принтеров. Вызывать в фоне: PowerShell стартует до нескольких секунд."""
     try:
         cmd = ("Add-Type -AssemblyName System.Drawing; "
                "[System.Drawing.Printing.PrinterSettings]::InstalledPrinters")
@@ -38,10 +38,6 @@ def _ps_quote(value: str) -> str:
 
 
 def send_image_to_printer(pil_image, printer_name: str | None = None) -> tuple[bool, str]:
-    """Отправить изображение на принтер.
-
-    Возвращает (успех, текст ошибки). Временный файл удаляется всегда.
-    """
     fd, temp_img = tempfile.mkstemp(prefix="get_print_", suffix=".png")
     os.close(fd)
     try:
@@ -61,7 +57,7 @@ def send_image_to_printer(pil_image, printer_name: str | None = None) -> tuple[b
             "$doc.add_PrintPage({ "
             "  param($s, $e) "
             "  $e.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic; "
-            "  $pb = $e.MarginBounds; "
+            "  $pb = $e.PageBounds; "
             "  $ratio = $img.Width / $img.Height; "
             "  if ($pb.Width / $pb.Height -gt $ratio) { "
             "    $w = $pb.Height * $ratio; $h = $pb.Height; "
@@ -91,7 +87,6 @@ def send_image_to_printer(pil_image, printer_name: str | None = None) -> tuple[b
 
 
 def printer_can_duplex(printer_name: str | None = None) -> bool:
-    """Умеет ли принтер автоматическую двухстороннюю печать."""
     printer_cmd = ""
     if printer_name and printer_name != DEFAULT_PRINTER:
         printer_cmd = f"$s.PrinterName = '{_ps_quote(printer_name)}'; "
@@ -109,15 +104,6 @@ def printer_can_duplex(printer_name: str | None = None) -> bool:
 
 
 def _send_duplex_job(front_image, back_image, printer_name=None) -> tuple[bool, str]:
-    """Одно задание печати на обе стороны листа средствами драйвера.
-
-    Требует принтер с автоматическим дуплексом (см. printer_can_duplex) —
-    иначе используйте две отдельные печати с ручным переворотом листа.
-    Какая сторона листа физически становится «верхней» после переворота
-    (длинный/короткий край) зависит от конкретной модели принтера и его
-    драйвера; Duplex.Vertical — типичное значение по умолчанию, но на
-    отдельных принтерах может потребоваться Duplex.Horizontal.
-    """
     fd1, temp_front = tempfile.mkstemp(prefix="get_print_front_", suffix=".png")
     os.close(fd1)
     fd2, temp_back = tempfile.mkstemp(prefix="get_print_back_", suffix=".png")
@@ -125,7 +111,11 @@ def _send_duplex_job(front_image, back_image, printer_name=None) -> tuple[bool, 
     try:
         front_image.save(temp_front, "PNG")
         back_image.save(temp_back, "PNG")
-        is_landscape = "$true" if front_image.width > front_image.height else "$false"
+        is_landscape = front_image.width > front_image.height
+        is_landscape_ps = "$true" if is_landscape else "$false"
+        # Для Landscape переворот по короткому краю листа (Horizontal), чтобы не было "вверх ногами"
+        duplex_mode = "Horizontal" if is_landscape else "Vertical"
+
         printer_cmd = ""
         if printer_name and printer_name != DEFAULT_PRINTER:
             printer_cmd = f"$doc.PrinterSettings.PrinterName = '{_ps_quote(printer_name)}'; "
@@ -134,9 +124,9 @@ def _send_duplex_job(front_image, back_image, printer_name=None) -> tuple[bool, 
             "Add-Type -AssemblyName System.Drawing; "
             "$doc = New-Object System.Drawing.Printing.PrintDocument; "
             f"{printer_cmd}"
-            f"$doc.DefaultPageSettings.Landscape = {is_landscape}; "
+            f"$doc.DefaultPageSettings.Landscape = {is_landscape_ps}; "
             "$doc.OriginAtMargins = $false; "
-            "$doc.PrinterSettings.Duplex = [System.Drawing.Printing.Duplex]::Vertical; "
+            f"$doc.PrinterSettings.Duplex = [System.Drawing.Printing.Duplex]::{duplex_mode}; "
             f"$imgs = @([System.Drawing.Image]::FromFile('{_ps_quote(temp_front)}'), "
             f"[System.Drawing.Image]::FromFile('{_ps_quote(temp_back)}')); "
             "$idx = 0; "
@@ -144,7 +134,7 @@ def _send_duplex_job(front_image, back_image, printer_name=None) -> tuple[bool, 
             "  param($s, $e) "
             "  $img = $imgs[$idx]; "
             "  $e.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic; "
-            "  $pb = $e.MarginBounds; "
+            "  $pb = $e.PageBounds; "
             "  $ratio = $img.Width / $img.Height; "
             "  if ($pb.Width / $pb.Height -gt $ratio) { "
             "    $w = $pb.Height * $ratio; $h = $pb.Height; "
@@ -178,15 +168,6 @@ def _send_duplex_job(front_image, back_image, printer_name=None) -> tuple[bool, 
 
 def print_pass_two_sided(front_image, back_image, printer_name=None,
                          confirm_flip=None) -> tuple[bool, str]:
-    """Печать пропуска на обе стороны листа.
-
-    Если принтер умеет автоматический дуплекс — одно задание на обе
-    стороны. Иначе печатает лицевую сторону, спрашивает подтверждение
-    через confirm_flip (пользователь должен успеть перевернуть лист в
-    лотке принтера) и печатает оборот отдельным заданием. confirm_flip
-    возвращает False, если печать оборота нужно отменить — лицевая
-    сторона при этом уже напечатана.
-    """
     if printer_can_duplex(printer_name):
         return _send_duplex_job(front_image, back_image, printer_name)
     ok, err = send_image_to_printer(front_image, printer_name)
@@ -197,15 +178,20 @@ def print_pass_two_sided(front_image, back_image, printer_name=None,
     return send_image_to_printer(back_image, printer_name)
 
 
-def save_document(image, filepath: str) -> None:
-    """Сохранить документ, проставив разрешение и для PDF, и для JPEG.
-
-    Для JPEG параметр `resolution=` игнорируется Pillow, и файл уходил без DPI —
-    печать такого файла давала произвольный масштаб.
-    """
+def save_document(image: Image.Image, filepath: str) -> None:
     ext = os.path.splitext(filepath)[1].lower()
     if ext in (".jpg", ".jpeg"):
-        image.save(filepath, "JPEG", quality=95, dpi=(300, 300))
+        # Предотвращение падения "cannot write mode RGBA as JPEG"
+        if image.mode in ("RGBA", "LA", "P"):
+            rgb_img = Image.new("RGB", image.size, (255, 255, 255))
+            converted = image.convert("RGBA")
+            rgb_img.paste(converted, mask=converted.getchannel("A"))
+            save_img = rgb_img
+        elif image.mode != "RGB":
+            save_img = image.convert("RGB")
+        else:
+            save_img = image
+        save_img.save(filepath, "JPEG", quality=95, dpi=(300, 300))
     elif ext == ".png":
         image.save(filepath, "PNG", dpi=(300, 300))
     else:
@@ -213,10 +199,4 @@ def save_document(image, filepath: str) -> None:
 
 
 def save_pdf_pages(pages, filepath: str) -> int:
-    """Многостраничный PDF из итератора страниц.
-
-    Использует собственный потоковый писатель: Pillow при save_all собирает
-    список всех страниц до кодирования, и 25 листов А4 300 dpi занимали
-    около 840 МБ вне зависимости от того, передан список или генератор.
-    """
     return write_pdf(pages, filepath, dpi=300)

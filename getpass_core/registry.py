@@ -101,8 +101,9 @@ def build_registry_pages(records, spec: RegistrySpec, total_in_base: int,
         draw.rectangle([table_x, th_y, table_x + table_w, th_y + th_h], fill=C_NAVY)
         curr_x = table_x
         for col in spec.columns:
-            draw.text((curr_x + col.width // 2, th_y + th_h // 2), col.title,
-                      fill="white", font=font_th, anchor="mm")
+            # Безопасная посадка заголовка столбца
+            _fit_text(draw, col.title, curr_x + col.width // 2, th_y + th_h // 2,
+                      col.width - 16, 34, anchor="mm", fill="white", bold=True)
             curr_x += col.width
 
         tr_y, tr_h = th_y + th_h, 105
@@ -129,7 +130,10 @@ def build_registry_pages(records, spec: RegistrySpec, total_in_base: int,
         draw.text((PAGE_W // 2, 3420), f"Страница {page_idx} из {total_pages}",
                   fill="#777777", font=font_page, anchor="mm")
         if progress:
-            progress(page_idx, total_pages)
+            try:
+                progress(page_idx, total_pages)
+            except Exception:
+                pass
         yield img
 
 
@@ -146,20 +150,22 @@ def _draw_cell(draw, col, value, curr_x, mid_y, font_td, font_td_bold, font_td_p
         draw.text((curr_x + col.width // 2, mid_y), f"до {value}" if value else "—",
                   fill=C_RED, font=font_td_bold, anchor="mm")
         return
-    bold = col.style == "bold"
-    base_font = font_td_bold if bold else font_td
+
+    bold = (col.style == "bold")
     size = 34 if bold else 32
+
     if col.icon_when and col.icon_when in value.lower():
         draw_dot_icon(draw, "p", curr_x + 40, mid_y, C_NAVY, size=44, anchor="mm")
         _fit_text(draw, value, curr_x + 78, mid_y, col.width - 100, size,
-                  font_echoes=base_font, anchor="lm", bold=bold)
+                  anchor="lm", bold=bold)
         return
+
     if col.align == "left":
         _fit_text(draw, value, curr_x + 20, mid_y, col.width - 35, size,
-                  font_echoes=base_font, anchor="lm", bold=bold)
+                  anchor="lm", bold=bold)
     else:
         _fit_text(draw, value, curr_x + col.width // 2, mid_y, col.width - 30, size,
-                  font_echoes=base_font, anchor="mm", bold=bold)
+                  anchor="mm", bold=bold)
 
 
 def save_registry_pdf(records, spec, total_in_base, filepath, progress=None):

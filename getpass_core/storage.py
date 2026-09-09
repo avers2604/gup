@@ -1,13 +1,10 @@
-"""Журналы пропусков: единая реализация для ТС и для работников.
-
-Заменяет две почти одинаковые пары функций (чтение/запись/экспорт), которые
-раньше жили отдельно и успели разойтись по багам.
-"""
+"""Журналы пропусков: единая реализация для ТС и для работников."""
 from __future__ import annotations
 
 import csv
 import json
 import os
+import re
 import sqlite3
 import uuid
 import xml.sax.saxutils as saxutils
@@ -20,6 +17,8 @@ from .domain import DATE_FMT, get_excel_col_letter, parse_date, plate_key
 
 STATUS_ACTIVE = "действует"
 STATUS_REVOKED = "аннулирован"
+
+_XML_ILLEGAL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
 class FileBusy(Exception):
@@ -45,11 +44,8 @@ class JournalSchema:
     csv_path: str
     xlsx_path: str
     fields: tuple[Field, ...]
-    #: имя таблицы в общей базе SQLite (config.DB_FILE)
     table: str = ""
-    # ключевое поле для поиска дублей (госномер / табельный номер)
     dup_key: str = ""
-    #: как читать записи старых версий: длина строки -> список ключей
     legacy_layouts: dict = field(default_factory=dict)
 
     @property
@@ -108,7 +104,6 @@ BADGE_SCHEMA = JournalSchema(
         Field("phone", "Телефон", 18, 120, "center"),
         Field("issue_date", "Дата выдачи", 16, 105, "center"),
         Field("valid_until", "Действителен до", 16, 135, "center"),
-        # не показывается в журнале колонкой — только для перевыпуска бейджа
         Field("photo_path", "Фото", 40, 0, "w"),
     ) + _AUDIT_FIELDS,
     legacy_layouts={
@@ -121,7 +116,11 @@ def new_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
-# --------------------------------------------------------------- XLSX
+def _clean_xml(val: str) -> str:
+    """Очистить строку от недопустимых в XML 1.0 управляющих символов и экранировать."""
+    cleaned = _XML_ILLEGAL_CHARS.sub("", str(val))
+    return saxutils.escape(cleaned)
+
 
 def export_records_to_xlsx(rows, cols_def, filepath, sheet_name="Журнал"):
     """Минимальный писатель XLSX без внешних зависимостей."""
@@ -138,16 +137,16 @@ def export_records_to_xlsx(rows, cols_def, filepath, sheet_name="Журнал"):
     for i, (name, _) in enumerate(cols_def):
         letter = get_excel_col_letter(i + 1)
         sheet_xml.append(
-            f'      <c r="{letter}1" t="inlineStr"><is><t>{saxutils.escape(name)}</t></is></c>')
+            f'      <c r="{letter}1" t="inlineStr"><is><t>{_clean_xml(name)}</t></is></c>')
     sheet_xml.append('    </row>')
     for r_idx, row_data in enumerate(rows, start=2):
         sheet_xml.append(f'    <row r="{r_idx}">')
         for c_idx in range(len(cols_def)):
-            val = str(row_data[c_idx]) if c_idx < len(row_data) else ""
+            val = row_data[c_idx] if c_idx < len(row_data) else ""
             letter = get_excel_col_letter(c_idx + 1)
             sheet_xml.append(
                 f'      <c r="{letter}{r_idx}" t="inlineStr">'
-                f'<is><t>{saxutils.escape(val)}</t></is></c>')
+                f'<is><t>{_clean_xml(val)}</t></is></c>')
         sheet_xml.append('    </row>')
     sheet_xml.append('  </sheetData>')
     sheet_xml.append('</worksheet>')
@@ -178,47 +177,47 @@ def export_records_to_xlsx(rows, cols_def, filepath, sheet_name="Журнал"):
         '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">\n'
         '  <sheets>\n'
-        f'    <sheet name="{saxutils.escape(sheet_name)}" sheetId="1" r:id="rId1"/>\n'
+        f'    <sheet name="{_clean_xml(sheet_name)}" sheetId="1" r:id="rId1"/>\n'
         '  </sheets>\n'
         '</workbook>'
     )
     tmp = filepath + ".tmp"
-    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("[Content_Types].xml", content_types)
-        zf.writestr("_rels/.rels", rels)
-        zf.writestr("xl/_rels/workbook.xml.rels", wb_rels)
-        zf.writestr("xl/workbook.xml", workbook)
-        zf.writestr("xl/worksheets/sheet1.xml", sheet_str)
-    os.replace(tmp, filepath)
+    try:
+        with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("[Content_Types].xml", content_types)
+            zf.writestr("_rels/.rels", rels)
+            zf.writestr("xl/_rels/workbook.xml.rels", wb_rels)
+            zf.writestr("xl/workbook.xml", workbook)
+            zf.writestr("xl/worksheets/sheet1.xml", sheet_str)
+        os.replace(tmp, filepath)
+    except PermissionError as exc:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+        raise FileBusy(filepath) from exc
 
-
-# ------------------------------------------------------------ журнал
 
 class Journal:
-    """Журнал выдачи. Одна реализация для пропусков ТС и для бейджей.
-
-    Хранилище — общая база SQLite (config.DB_FILE), одна таблица на журнал.
-    Раньше каждая запись жила в CSV + зеркальном XLSX: запись была
-    неатомарной (сбой между двумя файлами рассинхронизировал их), а сам
-    файл журнала было легко случайно заблокировать, открыв его в Excel.
-    Таблица создаётся лениво при первом обращении; если её ещё нет, но
-    существует CSV старой версии — данные переносятся один раз (см.
-    _ensure_table). Старые CSV/XLSX после этого не трогаются и не
-    читаются повторно.
-    """
+    """Журнал выдачи. База данных SQLite с ленивой миграцией."""
 
     def __init__(self, schema: JournalSchema):
         self.schema = schema
 
-    # ---- подключение и ленивая миграция
-
     def _connect(self) -> sqlite3.Connection:
         os.makedirs(os.path.dirname(config.DB_FILE) or ".", exist_ok=True)
         try:
-            conn = sqlite3.connect(config.DB_FILE, timeout=5)
+            conn = sqlite3.connect(config.DB_FILE, timeout=10)
         except sqlite3.OperationalError as exc:
             raise FileBusy(config.DB_FILE) from exc
+
         conn.row_factory = sqlite3.Row
+        # Оптимизация параллельного доступа и устойчивости к сбоям
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA busy_timeout = 10000")
+
         self._ensure_table(conn)
         return conn
 
@@ -242,12 +241,10 @@ class Journal:
         placeholders = ", ".join("?" for _ in cols)
         conn.executemany(
             f'INSERT INTO "{self.schema.table}" ({col_list}) VALUES ({placeholders})',
-            [tuple(rec.get(k, "") for k in cols) for rec in records])
+            [tuple(rec.get(k, "") for k in cols) for rec in records],
+        )
 
     def _read_legacy_csv(self) -> list[dict]:
-        """Разобрать журнал старой (файловой) версии для одноразового
-        переноса в SQLite. Формат — тот же CSV с ; и старыми layout'ами,
-        что читался напрямую до перехода на базу."""
         path = self.schema.csv_path
         if not os.path.exists(path):
             return []
@@ -279,7 +276,6 @@ class Journal:
         return records
 
     def _keys_for(self, header) -> list[str] | None:
-        """Сопоставить заголовок файла с ключами схемы (по названиям колонок)."""
         titles = {f.title.strip().lower(): f.key for f in self.schema.fields}
         mapped, hits = [], 0
         for cell in header:
@@ -288,21 +284,16 @@ class Journal:
             hits += bool(key)
         return mapped if hits >= max(2, len(header) // 2) else None
 
-    # ---- чтение
-
     def read(self) -> list[dict]:
         conn = self._connect()
         try:
-            rows = conn.execute(f'SELECT * FROM "{self.schema.table}"').fetchall()
+            rows = conn.execute(f'SELECT * FROM "{self.schema.table}" ORDER BY rowid ASC').fetchall()
             return [dict(row) for row in rows]
         finally:
             conn.close()
 
-    # ---- запись
-
     def write(self, records: list[dict]) -> None:
-        """Атомарно переписать журнал (одна транзакция). Бросает FileBusy,
-        если база занята другим процессом."""
+        """Полная перезапись таблицы в единой транзакции."""
         conn = self._connect()
         try:
             with conn:
@@ -313,51 +304,102 @@ class Journal:
         finally:
             conn.close()
 
-    # ---- операции
-
     def append_many(self, new_records: list[dict]) -> list[dict]:
-        """Дописать пачку записей ОДНОЙ перезаписью файла (а не N перезаписями)."""
-        current = self.read()
+        """Дописать пачку записей точечным INSERT без полной перезаписи базы."""
+        if not new_records:
+            return self.read()
+
+        cols = self.schema.keys
+        prepared_list = []
         for rec in new_records:
-            prepared = {k: "" for k in self.schema.keys}
+            prepared = {k: "" for k in cols}
             prepared.update({k: v for k, v in rec.items() if k in prepared})
             prepared["id"] = prepared.get("id") or new_id()
             prepared["status"] = prepared.get("status") or STATUS_ACTIVE
-            current.append(prepared)
-        self.write(current)
-        return current
+            prepared_list.append(prepared)
+
+        col_list = ", ".join(f'"{k}"' for k in cols)
+        placeholders = ", ".join("?" for _ in cols)
+
+        conn = self._connect()
+        try:
+            with conn:
+                conn.executemany(
+                    f'INSERT INTO "{self.schema.table}" ({col_list}) VALUES ({placeholders})',
+                    [tuple(rec.get(k, "") for k in cols) for rec in prepared_list],
+                )
+        except sqlite3.OperationalError as exc:
+            raise FileBusy(config.DB_FILE) from exc
+        finally:
+            conn.close()
+
+        return self.read()
 
     def delete_ids(self, ids) -> list[dict]:
-        ids = set(ids)
-        current = [r for r in self.read() if r.get("id") not in ids]
-        self.write(current)
-        return current
+        id_list = list(set(ids))
+        if not id_list:
+            return self.read()
+
+        conn = self._connect()
+        placeholders = ", ".join("?" for _ in id_list)
+        try:
+            with conn:
+                conn.execute(
+                    f'DELETE FROM "{self.schema.table}" WHERE "id" IN ({placeholders})',
+                    id_list,
+                )
+        except sqlite3.OperationalError as exc:
+            raise FileBusy(config.DB_FILE) from exc
+        finally:
+            conn.close()
+
+        return self.read()
 
     def revoke_ids(self, ids, reason: str, when: str = "") -> list[dict]:
-        """Аннулировать записи, сохранив их в истории (вместо удаления)."""
-        ids = set(ids)
+        id_list = list(set(ids))
+        if not id_list:
+            return self.read()
+
         when = when or datetime.now().strftime(DATE_FMT)
-        current = self.read()
-        for rec in current:
-            if rec.get("id") in ids and rec.get("status") != STATUS_REVOKED:
-                rec["status"] = STATUS_REVOKED
-                rec["revoked_at"] = when
-                rec["revoke_reason"] = reason
-        self.write(current)
-        return current
+        conn = self._connect()
+        placeholders = ", ".join("?" for _ in id_list)
+        try:
+            with conn:
+                conn.execute(
+                    f'UPDATE "{self.schema.table}" SET "status" = ?, "revoked_at" = ?, "revoke_reason" = ? '
+                    f'WHERE "id" IN ({placeholders}) AND "status" != ?',
+                    [STATUS_REVOKED, when, reason] + id_list + [STATUS_REVOKED],
+                )
+        except sqlite3.OperationalError as exc:
+            raise FileBusy(config.DB_FILE) from exc
+        finally:
+            conn.close()
+
+        return self.read()
 
     def update_record(self, rec_id: str, values: dict) -> list[dict]:
-        current = self.read()
-        for rec in current:
-            if rec.get("id") == rec_id:
-                rec.update({k: v for k, v in values.items() if k in rec})
-        self.write(current)
-        return current
+        valid_items = [(k, v) for k, v in values.items() if k in self.schema.keys and k != "id"]
+        if not valid_items:
+            return self.read()
 
-    # ---- выборки
+        set_clause = ", ".join(f'"{k}" = ?' for k, _ in valid_items)
+        params = [v for _, v in valid_items] + [rec_id]
+
+        conn = self._connect()
+        try:
+            with conn:
+                conn.execute(
+                    f'UPDATE "{self.schema.table}" SET {set_clause} WHERE "id" = ?',
+                    params,
+                )
+        except sqlite3.OperationalError as exc:
+            raise FileBusy(config.DB_FILE) from exc
+        finally:
+            conn.close()
+
+        return self.read()
 
     def active(self, records=None, today=None):
-        """Действующие, просроченные и записи без внятного срока — раздельно."""
         records = self.read() if records is None else records
         today = today or datetime.now().date()
         live, expired, unknown = [], [], []
@@ -375,7 +417,6 @@ class Journal:
         return live, expired, unknown
 
     def find_duplicates(self, value: str, today=None, exclude_id: str = "") -> list[dict]:
-        """Действующие записи с тем же ключом (госномер / табельный номер)."""
         if not self.schema.dup_key or not (value or "").strip():
             return []
         norm = self._norm_key(value)
@@ -394,7 +435,6 @@ class Journal:
         return "".join((value or "").upper().split())
 
     def distinct(self, key: str, records=None) -> list[str]:
-        """Уникальные непустые значения поля — для фильтров и автодополнения."""
         records = self.read() if records is None else records
         values = {(rec.get(key) or "").strip() for rec in records}
         values.discard("")
@@ -404,8 +444,6 @@ class Journal:
 PASS_JOURNAL = Journal(PASS_SCHEMA)
 BADGE_JOURNAL = Journal(BADGE_SCHEMA)
 
-
-# --------------------------------------------------- база автомобилей
 
 def load_cars_cache() -> dict:
     if os.path.exists(config.CARS_CACHE_FILE):
@@ -431,7 +469,6 @@ def save_cars_cache(cache: dict) -> None:
 
 
 def update_cars_cache(car_infos) -> None:
-    """Обновить базу пачкой: одно чтение и одна запись на весь список."""
     if isinstance(car_infos, dict):
         car_infos = [car_infos]
     cache = load_cars_cache()
@@ -447,9 +484,6 @@ def update_cars_cache(car_infos) -> None:
             "d_pos": car.get("d_pos", ""), "d_fio": car.get("d_fio", ""),
             "d_phone": car.get("phone", ""), "territory": car.get("territory", ""),
         }
-        # не затираем ранее известные поля пустыми значениями — например,
-        # повторная выдача пропуска без указания цвета не должна стирать
-        # цвет, сохранённый при первой выдаче
         cache[key] = {k: (v or existing.get(k, "")) for k, v in incoming.items()}
         changed = True
     if changed:
@@ -461,22 +495,23 @@ def lookup_car(plate: str) -> dict | None:
 
 
 def known_car_brands() -> list[str]:
-    """Марки машин, встречавшиеся в базе — для автодополнения."""
     values = {(car.get("brand") or "").strip() for car in load_cars_cache().values()}
     values.discard("")
     return sorted(values, key=str.lower)
 
 
 def export_journal(journal, filepath: str) -> int:
-    """Выгрузить журнал в отдельный файл XLSX или CSV. Возвращает число записей."""
     records = journal.read()
     schema = journal.schema
     rows = [[rec.get(k, "") for k in schema.keys] for rec in records]
     if filepath.lower().endswith(".csv"):
-        with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
-            writer = csv.writer(f, delimiter=";")
-            writer.writerow(schema.header)
-            writer.writerows(rows)
+        try:
+            with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
+                writer = csv.writer(f, delimiter=";")
+                writer.writerow(schema.header)
+                writer.writerows(rows)
+        except PermissionError as exc:
+            raise FileBusy(filepath) from exc
     else:
         export_records_to_xlsx(rows, schema.cols_def, filepath, schema.name)
     return len(records)

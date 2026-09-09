@@ -1,19 +1,7 @@
-"""Бланк пропуска на ТС, построенный кодом.
-
-Раньше подложкой служил растровый template.png: без файла программа
-печатала пропуска на белом листе, а разрешение бланка было ограничено
-разрешением картинки. Здесь разметка — рамки, заголовок, подписи полей,
-блок дат — строится в коде, как это сделано для бейджа работника.
-
-Единственный растровый элемент — фирменный знак ГЭТ: официальный логотип
-не воспроизводится вручную, он лежит отдельным ресурсом в assets/.
-
-Координаты приведены к листу 2480x1560 и сняты с типографского бланка.
-"""
+"""Бланк пропуска на ТС, построенный кодом."""
 from __future__ import annotations
 
 import os
-
 from PIL import Image, ImageDraw
 
 from . import config
@@ -21,17 +9,16 @@ from .fonts import get_echoes_font
 
 PASS_W, PASS_H = 2480, 1560
 
-C_BORDER = "#1B2A4F"      # рамки блоков
-C_HAIRLINE = "#6F768C"    # тонкие линии-подсказки внутри блоков
-C_SIGN_LINE = "#A8ABB6"   # линии для подписи в блоке ОТБ
-C_LABEL = "#181A30"       # названия полей
-C_CAPTION = "#6F768C"     # пояснения под линиями
+C_BORDER = "#1B2A4F"
+C_HAIRLINE = "#6F768C"
+C_SIGN_LINE = "#A8ABB6"
+C_LABEL = "#181A30"
+C_CAPTION = "#6F768C"
 C_PAPER = "#FFFFFF"
 
 BORDER_W = 3
 RADIUS = 22
 
-#: (левый, верхний, правый, нижний)
 BOX_DATE = (1835, 85, 2418, 329)
 BOX_PLATE = (62, 485, 2418, 665)
 BOX_BRAND = (62, 694, 1220, 854)
@@ -47,15 +34,18 @@ LOGO_WIDTH = 796
 TITLE_BASELINE = 409
 TITLE_X = 840
 
-LABEL_DX, LABEL_DY = 36, 25       # отступ названия поля от угла блока
-HAIRLINE_INSET = 33               # отступ тонкой линии от края блока
+LABEL_DX, LABEL_DY = 36, 25
+HAIRLINE_INSET = 33
 
-_ASSETS_DIR = os.path.join(config.SCRIPT_DIR, "assets")
+_ASSETS_DIR = os.path.join(config.BUNDLE_DIR, "assets")
+if not os.path.exists(_ASSETS_DIR):
+    _ASSETS_DIR = os.path.join(config.SCRIPT_DIR, "assets")
+
 LOGO_FILE = os.path.join(_ASSETS_DIR, "logo_get.png")
 
-_logo_cache: dict = {}
-_knockout_cache: dict = {}
-_blank_cache: dict = {}
+_logo_cache: dict[int, Image.Image] = {}
+_knockout_cache: dict[int, Image.Image] = {}
+_blank_cache: dict[str, Image.Image] = {}
 
 
 def logo_available() -> bool:
@@ -63,7 +53,6 @@ def logo_available() -> bool:
 
 
 def load_logo(width: int):
-    """Фирменный знак ГЭТ, масштабированный до нужной ширины."""
     cached = _logo_cache.get(width)
     if cached is not None:
         return cached.copy()
@@ -80,11 +69,6 @@ def load_logo(width: int):
 
 
 def load_logo_knockout(width: int):
-    """Белая выворотка знака — брендбук разрешает её на тёмно-синем и чёрном.
-
-    Используется в интерфейсе на тёмных панелях (шапка, боковая навигация),
-    где цветной знак на тёмном фоне не читается.
-    """
     cached = _knockout_cache.get(width)
     if cached is not None:
         return cached.copy()
@@ -117,7 +101,6 @@ def _caption(draw, x, y, text, size=32):
 
 
 def build_pass_blank() -> Image.Image:
-    """Пустой бланк пропуска на ТС (без номера и данных)."""
     cached = _blank_cache.get("pass")
     if cached is not None:
         return cached.copy()
@@ -155,7 +138,7 @@ def build_pass_blank() -> Image.Image:
                             (1570, 2265, "Расшифровка")):
         draw.line([(x0, 1432), (x1, 1432)], fill=C_SIGN_LINE, width=2)
         _caption(draw, (x0 + x1) // 2, 1440, caption, size=30)
-    # выравнивание по правому краю: при левом якоре надпись вылезала за рамку
+
     draw.text((2387, 1432), "М.П.", fill=C_LABEL,
               font=get_echoes_font(38, bold=True), anchor="rs")
 
@@ -165,4 +148,5 @@ def build_pass_blank() -> Image.Image:
 
 def reset_cache() -> None:
     _logo_cache.clear()
+    _knockout_cache.clear()
     _blank_cache.clear()
