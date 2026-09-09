@@ -8,7 +8,7 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 
-from getpass_core import backup as backup_mod
+import getpass_core
 from getpass_core import blacklist
 from getpass_core import config, printing
 from getpass_core.domain import (add_months_safe, add_years_safe, format_date,
@@ -494,7 +494,7 @@ class App:
     @staticmethod
     def _rotate_backups():
         try:
-            backup_mod.rotate_backups(14)
+            getpass_core.backup.rotate_backups(14)
         except Exception:
             pass
 
@@ -945,7 +945,7 @@ class App:
         if not path:
             return
         try:
-            count, size = backup_mod.create_backup(path)
+            count, size = getpass_core.backup.create_backup(path)
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось создать бэкап: {exc}")
             return
@@ -962,7 +962,7 @@ class App:
         if not path:
             return
         try:
-            accepted, skipped = backup_mod.inspect_backup(path)
+            accepted, skipped = getpass_core.backup.inspect_backup(path)
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось прочитать архив: {exc}")
             return
@@ -978,7 +978,7 @@ class App:
                 f"Текущие данные будут перезаписаны.{note}\n\nПродолжить?"):
             return
         try:
-            restored, _ = backup_mod.restore_backup(path)
+            restored, _ = getpass_core.backup.restore_backup(path)
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось восстановить: {exc}")
             return
