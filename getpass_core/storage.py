@@ -8,7 +8,7 @@ from __future__ import annotations
 import csv
 import json
 import os
-import shutil
+import sqlite3
 import uuid
 import xml.sax.saxutils as saxutils
 import zipfile
@@ -45,6 +45,8 @@ class JournalSchema:
     csv_path: str
     xlsx_path: str
     fields: tuple[Field, ...]
+    #: имя таблицы в общей базе SQLite (config.DB_FILE)
+    table: str = ""
     # ключевое поле для поиска дублей (госномер / табельный номер)
     dup_key: str = ""
     #: как читать записи старых версий: длина строки -> список ключей
@@ -73,6 +75,7 @@ PASS_SCHEMA = JournalSchema(
     name="Журнал пропусков ТС",
     csv_path=config.LOG_CSV_FILE,
     xlsx_path=config.LOG_XLSX_FILE,
+    table="pass_journal",
     dup_key="plate",
     fields=(
         Field("id", "ID", 14, 0, "w"),
@@ -94,6 +97,7 @@ BADGE_SCHEMA = JournalSchema(
     name="Журнал постоянных бейджей",
     csv_path=config.BADGE_LOG_CSV,
     xlsx_path=config.BADGE_LOG_XLSX,
+    table="badge_journal",
     dup_key="tab_num",
     fields=(
         Field("id", "ID", 14, 0, "w"),
@@ -191,14 +195,59 @@ def export_records_to_xlsx(rows, cols_def, filepath, sheet_name="Журнал"):
 # ------------------------------------------------------------ журнал
 
 class Journal:
-    """Журнал выдачи. Одна реализация для пропусков ТС и для бейджей."""
+    """Журнал выдачи. Одна реализация для пропусков ТС и для бейджей.
+
+    Хранилище — общая база SQLite (config.DB_FILE), одна таблица на журнал.
+    Раньше каждая запись жила в CSV + зеркальном XLSX: запись была
+    неатомарной (сбой между двумя файлами рассинхронизировал их), а сам
+    файл журнала было легко случайно заблокировать, открыв его в Excel.
+    Таблица создаётся лениво при первом обращении; если её ещё нет, но
+    существует CSV старой версии — данные переносятся один раз (см.
+    _ensure_table). Старые CSV/XLSX после этого не трогаются и не
+    читаются повторно.
+    """
 
     def __init__(self, schema: JournalSchema):
         self.schema = schema
 
-    # ---- чтение
+    # ---- подключение и ленивая миграция
 
-    def read(self) -> list[dict]:
+    def _connect(self) -> sqlite3.Connection:
+        os.makedirs(os.path.dirname(config.DB_FILE) or ".", exist_ok=True)
+        try:
+            conn = sqlite3.connect(config.DB_FILE, timeout=5)
+        except sqlite3.OperationalError as exc:
+            raise FileBusy(config.DB_FILE) from exc
+        conn.row_factory = sqlite3.Row
+        self._ensure_table(conn)
+        return conn
+
+    def _ensure_table(self, conn: sqlite3.Connection) -> None:
+        table = self.schema.table
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone()
+        if exists:
+            return
+        cols = ", ".join(f'"{k}" TEXT' for k in self.schema.keys)
+        conn.execute(f'CREATE TABLE "{table}" ({cols}, PRIMARY KEY ("id"))')
+        legacy = self._read_legacy_csv()
+        if legacy:
+            self._insert_all(conn, legacy)
+        conn.commit()
+
+    def _insert_all(self, conn: sqlite3.Connection, records: list[dict]) -> None:
+        cols = self.schema.keys
+        col_list = ", ".join(f'"{k}"' for k in cols)
+        placeholders = ", ".join("?" for _ in cols)
+        conn.executemany(
+            f'INSERT INTO "{self.schema.table}" ({col_list}) VALUES ({placeholders})',
+            [tuple(rec.get(k, "") for k in cols) for rec in records])
+
+    def _read_legacy_csv(self) -> list[dict]:
+        """Разобрать журнал старой (файловой) версии для одноразового
+        переноса в SQLite. Формат — тот же CSV с ; и старыми layout'ами,
+        что читался напрямую до перехода на базу."""
         path = self.schema.csv_path
         if not os.path.exists(path):
             return []
@@ -239,39 +288,30 @@ class Journal:
             hits += bool(key)
         return mapped if hits >= max(2, len(header) // 2) else None
 
+    # ---- чтение
+
+    def read(self) -> list[dict]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(f'SELECT * FROM "{self.schema.table}"').fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
     # ---- запись
 
     def write(self, records: list[dict]) -> None:
-        """Атомарно переписать журнал. Бросает FileBusy, если файл занят."""
-        rows = [[rec.get(k, "") for k in self.schema.keys] for rec in records]
-        os.makedirs(os.path.dirname(self.schema.csv_path) or ".", exist_ok=True)
-        for path in (self.schema.csv_path, self.schema.xlsx_path):
-            if os.path.exists(path):
-                try:
-                    shutil.copy2(path, path + ".bak")
-                except Exception:
-                    pass
-        self._write_csv(rows)
-        self._write_xlsx(rows)
-
-    def _write_csv(self, rows) -> None:
-        path = self.schema.csv_path
-        tmp = path + ".tmp"
+        """Атомарно переписать журнал (одна транзакция). Бросает FileBusy,
+        если база занята другим процессом."""
+        conn = self._connect()
         try:
-            with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
-                writer = csv.writer(f, delimiter=";")
-                writer.writerow(self.schema.header)
-                writer.writerows(rows)
-            os.replace(tmp, path)
-        except PermissionError as exc:
-            raise FileBusy(path) from exc
-
-    def _write_xlsx(self, rows) -> None:
-        path = self.schema.xlsx_path
-        try:
-            export_records_to_xlsx(rows, self.schema.cols_def, path, self.schema.name)
-        except PermissionError as exc:
-            raise FileBusy(path) from exc
+            with conn:
+                conn.execute(f'DELETE FROM "{self.schema.table}"')
+                self._insert_all(conn, records)
+        except sqlite3.OperationalError as exc:
+            raise FileBusy(config.DB_FILE) from exc
+        finally:
+            conn.close()
 
     # ---- операции
 
