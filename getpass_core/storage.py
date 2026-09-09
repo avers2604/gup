@@ -117,13 +117,11 @@ def new_id() -> str:
 
 
 def _clean_xml(val: str) -> str:
-    """Очистить строку от недопустимых в XML 1.0 управляющих символов и экранировать."""
     cleaned = _XML_ILLEGAL_CHARS.sub("", str(val))
     return saxutils.escape(cleaned)
 
 
 def export_records_to_xlsx(rows, cols_def, filepath, sheet_name="Журнал"):
-    """Минимальный писатель XLSX без внешних зависимостей."""
     sheet_xml = [
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
@@ -200,7 +198,7 @@ def export_records_to_xlsx(rows, cols_def, filepath, sheet_name="Журнал"):
 
 
 class Journal:
-    """Журнал выдачи. База данных SQLite с ленивой миграцией."""
+    """Журнал выдачи на базе SQLite."""
 
     def __init__(self, schema: JournalSchema):
         self.schema = schema
@@ -213,7 +211,6 @@ class Journal:
             raise FileBusy(config.DB_FILE) from exc
 
         conn.row_factory = sqlite3.Row
-        # Оптимизация параллельного доступа и устойчивости к сбоям
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA synchronous = NORMAL")
         conn.execute("PRAGMA busy_timeout = 10000")
@@ -293,7 +290,7 @@ class Journal:
             conn.close()
 
     def write(self, records: list[dict]) -> None:
-        """Полная перезапись таблицы в единой транзакции."""
+        """Перезаписать журнал в рамках одной транзакции."""
         conn = self._connect()
         try:
             with conn:
@@ -305,99 +302,42 @@ class Journal:
             conn.close()
 
     def append_many(self, new_records: list[dict]) -> list[dict]:
-        """Дописать пачку записей точечным INSERT без полной перезаписи базы."""
-        if not new_records:
-            return self.read()
-
-        cols = self.schema.keys
-        prepared_list = []
+        """Дописать пачку записей через единый вызов write()."""
+        current = self.read()
         for rec in new_records:
-            prepared = {k: "" for k in cols}
+            prepared = {k: "" for k in self.schema.keys}
             prepared.update({k: v for k, v in rec.items() if k in prepared})
             prepared["id"] = prepared.get("id") or new_id()
             prepared["status"] = prepared.get("status") or STATUS_ACTIVE
-            prepared_list.append(prepared)
-
-        col_list = ", ".join(f'"{k}"' for k in cols)
-        placeholders = ", ".join("?" for _ in cols)
-
-        conn = self._connect()
-        try:
-            with conn:
-                conn.executemany(
-                    f'INSERT INTO "{self.schema.table}" ({col_list}) VALUES ({placeholders})',
-                    [tuple(rec.get(k, "") for k in cols) for rec in prepared_list],
-                )
-        except sqlite3.OperationalError as exc:
-            raise FileBusy(config.DB_FILE) from exc
-        finally:
-            conn.close()
-
-        return self.read()
+            current.append(prepared)
+        self.write(current)
+        return current
 
     def delete_ids(self, ids) -> list[dict]:
-        id_list = list(set(ids))
-        if not id_list:
-            return self.read()
-
-        conn = self._connect()
-        placeholders = ", ".join("?" for _ in id_list)
-        try:
-            with conn:
-                conn.execute(
-                    f'DELETE FROM "{self.schema.table}" WHERE "id" IN ({placeholders})',
-                    id_list,
-                )
-        except sqlite3.OperationalError as exc:
-            raise FileBusy(config.DB_FILE) from exc
-        finally:
-            conn.close()
-
-        return self.read()
+        id_set = set(ids)
+        current = [r for r in self.read() if r.get("id") not in id_set]
+        self.write(current)
+        return current
 
     def revoke_ids(self, ids, reason: str, when: str = "") -> list[dict]:
-        id_list = list(set(ids))
-        if not id_list:
-            return self.read()
-
+        id_set = set(ids)
         when = when or datetime.now().strftime(DATE_FMT)
-        conn = self._connect()
-        placeholders = ", ".join("?" for _ in id_list)
-        try:
-            with conn:
-                conn.execute(
-                    f'UPDATE "{self.schema.table}" SET "status" = ?, "revoked_at" = ?, "revoke_reason" = ? '
-                    f'WHERE "id" IN ({placeholders}) AND "status" != ?',
-                    [STATUS_REVOKED, when, reason] + id_list + [STATUS_REVOKED],
-                )
-        except sqlite3.OperationalError as exc:
-            raise FileBusy(config.DB_FILE) from exc
-        finally:
-            conn.close()
-
-        return self.read()
+        current = self.read()
+        for rec in current:
+            if rec.get("id") in id_set and rec.get("status") != STATUS_REVOKED:
+                rec["status"] = STATUS_REVOKED
+                rec["revoked_at"] = when
+                rec["revoke_reason"] = reason
+        self.write(current)
+        return current
 
     def update_record(self, rec_id: str, values: dict) -> list[dict]:
-        valid_items = [(k, v) for k, v in values.items() if k in self.schema.keys and k != "id"]
-        if not valid_items:
-            return self.read()
-
-        set_clause = ", ".join(f'"{k}" = ?' for k, _ in valid_items)
-        params = [v for _, v in valid_items] + [rec_id]
-
-        conn = self._connect()
-        try:
-            with conn:
-                conn.execute(
-                    f'UPDATE "{self.schema.table}" SET {set_clause} WHERE "id" = ?',
-                    params,
-                )
-        except sqlite3.OperationalError as exc:
-            raise FileBusy(config.DB_FILE) from exc
-        finally:
-            conn.close()
-
-        return self.read()
+        current = self.read()
+        for rec in current:
+            if rec.get("id") == rec_id:
+                rec.update({k: v for k, v in values.items() if k in rec})
+        self.write(current)
+        return current
 
     def active(self, records=None, today=None):
         records = self.read() if records is None else records
