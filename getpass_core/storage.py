@@ -104,6 +104,8 @@ BADGE_SCHEMA = JournalSchema(
         Field("phone", "Телефон", 18, 120, "center"),
         Field("issue_date", "Дата выдачи", 16, 105, "center"),
         Field("valid_until", "Действителен до", 16, 135, "center"),
+        # не показывается в журнале колонкой — только для перевыпуска бейджа
+        Field("photo_path", "Фото", 40, 0, "w"),
     ) + _AUDIT_FIELDS,
     legacy_layouts={
         7: ["tab_num", "fio", "role", "park", "phone", "issue_date", "valid_until"],
@@ -398,12 +400,17 @@ def update_cars_cache(car_infos) -> None:
         key = plate_key(car.get("plate"))
         if not key:
             continue
-        cache[key] = {
+        existing = cache.get(key, {})
+        incoming = {
             "brand": car.get("brand", ""), "model": car.get("model", ""),
             "type": car.get("type", ""), "color": car.get("color", ""),
             "d_pos": car.get("d_pos", ""), "d_fio": car.get("d_fio", ""),
             "d_phone": car.get("phone", ""), "territory": car.get("territory", ""),
         }
+        # не затираем ранее известные поля пустыми значениями — например,
+        # повторная выдача пропуска без указания цвета не должна стирать
+        # цвет, сохранённый при первой выдаче
+        cache[key] = {k: (v or existing.get(k, "")) for k, v in incoming.items()}
         changed = True
     if changed:
         save_cars_cache(cache)

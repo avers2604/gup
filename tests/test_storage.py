@@ -129,6 +129,24 @@ class TestCarsCache:
         update_cars_cache([{"plate": f"А{i:03d}АА78", "brand": "ГАЗ"} for i in range(20)])
         assert len(load_cars_cache()) == 20
 
+    def test_second_update_does_not_erase_missing_fields(self, data_dir):
+        """Повторная выдача пропуска без цвета/модели не должна стирать
+        ранее сохранённые значения — иначе данные о машине постепенно
+        обнуляются на каждой перевыдаче."""
+        from getpass_core.storage import lookup_car, update_cars_cache
+        update_cars_cache([{"plate": "О777ТВ198", "brand": "ГАЗ", "model": "Газель",
+                            "color": "белый"}])
+        update_cars_cache([{"plate": "О777ТВ198", "brand": "ГАЗ", "model": "", "color": ""}])
+        car = lookup_car("О777ТВ198")
+        assert car["model"] == "Газель"
+        assert car["color"] == "белый"
+
+    def test_second_update_still_overwrites_provided_fields(self, data_dir):
+        from getpass_core.storage import lookup_car, update_cars_cache
+        update_cars_cache([{"plate": "О777ТВ198", "brand": "ГАЗ", "color": "белый"}])
+        update_cars_cache([{"plate": "О777ТВ198", "brand": "ГАЗ", "color": "синий"}])
+        assert lookup_car("О777ТВ198")["color"] == "синий"
+
 
 class TestExport:
     def test_exports_csv(self, journal, tmp_path):
@@ -155,6 +173,39 @@ class TestExport:
     def test_export_of_empty_journal(self, journal, tmp_path):
         from getpass_core.storage import export_journal
         assert export_journal(journal, str(tmp_path / "пусто.csv")) == 0
+
+
+class TestBadgePhotoReference:
+    def test_photo_path_round_trips_through_journal(self, data_dir):
+        """Ссылка на фото должна сохраняться в журнале бейджей, иначе бейдж
+        нельзя перевыпустить без повторной загрузки и обрезки фотографии."""
+        from getpass_core.storage import BADGE_SCHEMA, Journal
+        schema = BADGE_SCHEMA.__class__(
+            name="Тест", csv_path=str(data_dir / "b.csv"), xlsx_path=str(data_dir / "b.xlsx"),
+            fields=BADGE_SCHEMA.fields, dup_key="tab_num",
+            legacy_layouts=BADGE_SCHEMA.legacy_layouts)
+        badge_journal = Journal(schema)
+        badge_journal.append_many([{"tab_num": "00001", "fio": "Иванов И.И.",
+                                    "photo_path": "/data/photos/00001.jpg"}])
+        assert badge_journal.read()[0]["photo_path"] == "/data/photos/00001.jpg"
+
+    def test_old_badge_csv_without_photo_column_still_reads(self, data_dir):
+        """Файлы, созданные до появления колонки «Фото», не должны падать —
+        photo_path просто остаётся пустым."""
+        from getpass_core.storage import BADGE_SCHEMA, Journal
+        schema = BADGE_SCHEMA.__class__(
+            name="Тест", csv_path=str(data_dir / "b.csv"), xlsx_path=str(data_dir / "b.xlsx"),
+            fields=BADGE_SCHEMA.fields, dup_key="tab_num",
+            legacy_layouts=BADGE_SCHEMA.legacy_layouts)
+        badge_journal = Journal(schema)
+        write_legacy(schema.csv_path,
+                     ["Табельный номер", "ФИО сотрудника", "Должность", "Подразделение",
+                      "Телефон", "Дата выдачи", "Действителен до"],
+                     [["00001", "Иванов И.И.", "Слесарь", "Парк №1",
+                       "+7 (921) 111-22-33", "01.01.2026", "31.12.2026"]])
+        rec = badge_journal.read()[0]
+        assert rec["photo_path"] == ""
+        assert rec["fio"] == "Иванов И.И."
 
 
 class TestDistinctAndBrands:
