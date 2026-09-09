@@ -34,8 +34,9 @@ jobs:
 
       - name: Установить зависимости
         run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
 
       - name: Установить UPX (доп. сжатие .exe)
         run: choco install upx -y --no-progress
@@ -64,7 +65,7 @@ jobs:
           if (Test-Path 'fronts') { $args += @('--add-data', 'fronts;fronts') }
           if (Test-Path 'app_icon.ico') { $args += @('--add-data', 'app_icon.ico;.') }
 
-          pyinstaller @args 'pass_generator.py'
+          python -m PyInstaller @args 'pass_generator.py'
 
       - name: Azure login
         if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
