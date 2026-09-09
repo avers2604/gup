@@ -15,7 +15,7 @@ from getpass_core.domain import (add_years_safe, format_date, next_number,
                                  parse_date, split_fio)
 from getpass_core.storage import BADGE_JOURNAL, FileBusy
 
-from .components import Field, section_title
+from .components import AutocompleteEntry, Field, section_title
 from .crop_window import open_crop_window, store_photo
 from .theme import Card, Theme
 from .widgets import Debouncer, make_scrollable
@@ -99,7 +99,7 @@ class BadgePanel:
         self.tab_num.set(self.settings.get("badge_tab_num", "01035"))
         self.tab_num.bind("<KeyRelease>", self.preview.schedule)
 
-        self.role = Field(b, th, "Должность", required=True)
+        self.role = AutocompleteEntry(b, th, "Должность", self._known_roles, required=True)
         self.role.pack(fill="x", pady=(0, th.sp(3)))
         self.role.bind("<KeyRelease>", self.preview.schedule, add="+")
 
@@ -186,6 +186,10 @@ class BadgePanel:
         self.panel.bind("<Configure>", lambda e: self.preview.schedule(delay=140))
 
     # ------------------------------------------------------- поведение
+
+    def _known_roles(self):
+        """Должности, уже встречавшиеся в журнале бейджей — для автодополнения."""
+        return BADGE_JOURNAL.distinct("role")
 
     def _make_upper(self, var):
         def callback(*_a):

@@ -131,6 +131,20 @@ def test_badge_requires_photo(app):
     assert app.badge.validated_data() is None
 
 
+def test_badge_role_autocompletes_from_journal(app):
+    """Должность в бейдже — свободный текст, но должна предлагать варианты
+    из уже выданных бейджей, а не заставлять вводить одно и то же заново."""
+    from getpass_core.storage import BADGE_JOURNAL
+    BADGE_JOURNAL.append_many([{"tab_num": "00099", "fio": "Тестов Т.Т.", "role": "Слесарь"}])
+    app.notebook.select(1)
+    app.root.update()
+    app.badge.role.widget.delete(0, tkinter.END)
+    app.badge.role.widget.insert(0, "слес")
+    app.badge.role._on_key(types.SimpleNamespace(keysym="e"))
+    app.root.update()
+    assert "Слесарь" in app.badge.role._listbox.get(0, tkinter.END)
+
+
 def test_empty_plate_is_flagged_invalid_before_print(app, monkeypatch):
     """Регрессия: validate_required() существовал, но никогда не вызывался
     перед печатью — поле не подсвечивалось, хотя предупреждение появлялось."""
