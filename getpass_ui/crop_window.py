@@ -126,7 +126,7 @@ class CropWindow:
         self.c.bind("<ButtonRelease-1>", self._on_release)
 
         for text, cmd in (("–  Уменьшить", lambda: self.zoom(0.85)),
-                          ("↺  Сброс", self.reset),
+                          ("Сброс", self.reset),
                           ("+  Увеличить", lambda: self.zoom(1.15))):
             tk.Button(self.zoom_bar, text=text, command=cmd, bg=STUDIO_PANEL,
                       fg=STUDIO_TEXT, font=th.font("body", bold=True),

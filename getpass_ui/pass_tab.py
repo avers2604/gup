@@ -44,7 +44,7 @@ class PassForm:
         self.num.insert(0, default_num)
         self.num.pack(side="left", padx=(theme.sp(2), theme.sp(3)), ipady=theme.px(3))
         if is_second:
-            tk.Button(top, text="⚡ №1 + 1", command=self._sync_from_peer,
+            tk.Button(top, text="№1 + 1", command=self._sync_from_peer,
                       bg=theme.c("surface_alt"), fg=theme.c("ink_muted"),
                       font=theme.font("caption"), relief="flat", padx=theme.px(6),
                       cursor="hand2", activebackground=theme.c("line")
