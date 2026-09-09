@@ -25,6 +25,16 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Установить UPX (доп. сжатие .exe)
+        run: choco install upx -y --no-progress
+
+      # UPX сжимает сам .exe (обычно на 40-60%) — PyInstaller находит upx.exe
+      # сам через PATH (choco ставит туда шим), доп. флаг не нужен.
+      # Компромисс: некоторые антивирусы эвристически подозревают
+      # UPX-упакованные exe (этим же приёмом пользуются вредоносы), поэтому
+      # возможно ложное срабатывание Defender/SmartScreen на рабочем
+      # компьютере. Если это случится — уберите шаг "Установить UPX" выше
+      # и пересоберите: PyInstaller соберёт обычный (несжатый UPX) exe.
       - name: Собрать .exe
         run: pyinstaller --onefile --windowed --icon app_icon.ico pass_generator.py
 
@@ -38,7 +48,9 @@ jobs:
           if (Test-Path assets) { Copy-Item assets $out\assets -Recurse }
           if (Test-Path fonts) { Copy-Item fonts $out\fonts -Recurse }
           if (Test-Path fronts) { Copy-Item fronts $out\fronts -Recurse }
-          Compress-Archive -Path "$out\*" -DestinationPath GET-Passes-windows.zip
+          # 7-Zip (уже есть на windows-latest) сжимает сильнее, чем
+          # Compress-Archive — LZMA2 вместо Deflate
+          7z a -tzip -mx=9 GET-Passes-windows.zip "$out\*"
 
       - name: Приложить архив к запуску (Actions Artifacts)
         uses: actions/upload-artifact@v4
