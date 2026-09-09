@@ -7,10 +7,22 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      HAS_AZURE_SIGNING_SECRETS: >-
+        ${{ secrets.AZURE_CLIENT_ID != '' &&
+            secrets.AZURE_TENANT_ID != '' &&
+            secrets.AZURE_SUBSCRIPTION_ID != '' &&
+            secrets.AZURE_KEY_VAULT_NAME != '' &&
+            secrets.AZURE_SIGN_CERT_NAME != '' &&
+            secrets.AZURE_SIGN_CERT_PASSWORD != '' }}
+      HAS_WINDOWS_SIGNING_SECRETS: >-
+        ${{ secrets.WINDOWS_SIGN_CERT_BASE64 != '' &&
+            secrets.WINDOWS_SIGN_CERT_PASSWORD != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,10 +48,26 @@ jobs:
       # компьютере. Если это случится — уберите шаг "Установить UPX" выше
       # и пересоберите: PyInstaller соберёт обычный (несжатый UPX) exe.
       - name: Собрать .exe
-        run: pyinstaller --onefile --windowed --icon app_icon.ico --name GET-Passes pass_generator.py
+        shell: pwsh
+        run: |
+          $args = @(
+            '--noconfirm',
+            '--clean',
+            '--onefile',
+            '--windowed',
+            '--icon', 'app_icon.ico',
+            '--name', 'GET-Passes'
+          )
+
+          if (Test-Path 'assets') { $args += @('--add-data', 'assets;assets') }
+          if (Test-Path 'fonts') { $args += @('--add-data', 'fonts;fonts') }
+          if (Test-Path 'fronts') { $args += @('--add-data', 'fronts;fronts') }
+          if (Test-Path 'app_icon.ico') { $args += @('--add-data', 'app_icon.ico;.') }
+
+          pyinstaller @args 'pass_generator.py'
 
       - name: Azure login
-        if: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' && secrets.AZURE_KEY_VAULT_NAME != '' && secrets.AZURE_SIGN_CERT_NAME != '' && secrets.AZURE_SIGN_CERT_PASSWORD != '' }}
+        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -47,7 +75,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Подписать EXE сертификатом из Azure Key Vault
-        if: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' && secrets.AZURE_KEY_VAULT_NAME != '' && secrets.AZURE_SIGN_CERT_NAME != '' && secrets.AZURE_SIGN_CERT_PASSWORD != '' }}
+        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' && env.HAS_WINDOWS_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
           AZURE_KEY_VAULT_NAME: ${{ secrets.AZURE_KEY_VAULT_NAME }}
@@ -56,6 +84,29 @@ jobs:
         run: |
           $pfxPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
           az keyvault secret download --vault-name "$env:AZURE_KEY_VAULT_NAME" --name "$env:AZURE_SIGN_CERT_NAME" --file "$pfxPath" --encoding base64
+
+          $signtool = Get-Command signtool.exe -ErrorAction Stop
+          if (-not (Test-Path "dist\GET-Passes.exe")) {
+            throw "dist\GET-Passes.exe not found"
+          }
+
+          & $signtool.Source sign `
+            /fd SHA256 `
+            /tr http://timestamp.digicert.com `
+            /td SHA256 `
+            /f "$pfxPath" `
+            /p "$env:AZURE_SIGN_CERT_PASSWORD" `
+            /v "dist\GET-Passes.exe"
+
+      - name: Подписать EXE обычным Windows сертификатом
+        if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
+        shell: pwsh
+        env:
+          WINDOWS_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_SIGN_CERT_BASE64 }}
+          WINDOWS_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "code-sign.pfx"
+          [System.Convert]::FromBase64String($env:WINDOWS_SIGN_CERT_BASE64) | Set-Content -Encoding Byte -Path $certPath
 
           $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
             Where-Object { $_.FullName -match "x64" } |
@@ -66,12 +117,16 @@ jobs:
             throw "signtool.exe not found"
           }
 
+          if (-not (Test-Path "dist\GET-Passes.exe")) {
+            throw "dist\GET-Passes.exe not found"
+          }
+
           & $signtool.FullName sign `
             /fd SHA256 `
             /tr http://timestamp.digicert.com `
             /td SHA256 `
-            /f "$pfxPath" `
-            /p "$env:AZURE_SIGN_CERT_PASSWORD" `
+            /f "$certPath" `
+            /p "$env:WINDOWS_SIGN_CERT_PASSWORD" `
             /v "dist\GET-Passes.exe"
 
       - name: Собрать папку для переноса

@@ -28,7 +28,22 @@ python pass_generator.py
 ```powershell
 python -m pip install -r requirements-dev.txt
 python -m pip install pyinstaller
-pyinstaller --onefile --windowed --icon app_icon.ico --name GET-Passes pass_generator.py
+
+$spec = @(
+  '--noconfirm',
+  '--clean',
+  '--onefile',
+  '--windowed',
+  '--icon', 'app_icon.ico',
+  '--name', 'GET-Passes'
+)
+
+if (Test-Path 'assets') { $spec += @('--add-data', 'assets;assets') }
+if (Test-Path 'fonts') { $spec += @('--add-data', 'fonts;fonts') }
+if (Test-Path 'fronts') { $spec += @('--add-data', 'fronts;fronts') }
+if (Test-Path 'app_icon.ico') { $spec += @('--add-data', 'app_icon.ico;.') }
+
+pyinstaller @spec pass_generator.py
 ```
 
 После сборки исполняемый файл появится в папке `dist\GET-Passes.exe`.
@@ -48,14 +63,16 @@ pyinstaller --onefile --windowed --icon app_icon.ico --name GET-Passes pass_gene
 Пример команды в GitHub Actions:
 
 ```powershell
-pyinstaller --onefile --windowed --icon app_icon.ico --name GET-Passes pass_generator.py
+pyinstaller --noconfirm --clean --onefile --windowed --icon app_icon.ico --name GET-Passes `
+  --add-data "assets;assets" --add-data "fonts;fonts" --add-data "app_icon.ico;." pass_generator.py
 ```
 
-Если проект запускается из папки с ресурсами, то иконка, логотип и шрифты находятся автоматически. При отсутствии ресурсов приложение продолжает работать в упрощённом режиме, но внешний вид будет базовым.
+Если ресурсы существуют рядом с проектом, они будут включены в один пакет и будут доступны внутри EXE. При отсутствии ресурсов приложение продолжает работать в упрощённом режиме, но внешний вид будет базовым.
 
 ## Возможности
 
 **Пропуск на ТС**
+
 - Карточная форма с автодополнением марки машины по базе, автозаполнением
   данных по госномеру, проверкой дублей и подсветкой обязательных полей
   в реальном времени
@@ -69,6 +86,7 @@ pyinstaller --onefile --windowed --icon app_icon.ico --name GET-Passes pass_gene
   флажком получается двухстраничный файл
 
 **Пропуск работника (бейдж)**
+
 - Кадрирование фотографии с масштабированием и перемещением; овальная
   направляющая поверх кадра подсказывает типовую компоновку паспортного
   фото (без распознавания лица — просто визуальный ориентир)
@@ -77,6 +95,7 @@ pyinstaller --onefile --windowed --icon app_icon.ico --name GET-Passes pass_gene
   переиздать без повторной загрузки и обрезки снимка
 
 **Журналы и реестры**
+
 - Хранилище — SQLite (`gup.sqlite3` в каталоге данных), а не пара
   CSV+XLSX: запись атомарна, файл журнала не блокируется, если кто-то
   открыл старую выгрузку в Excel
@@ -90,6 +109,7 @@ pyinstaller --onefile --windowed --icon app_icon.ico --name GET-Passes pass_gene
   из Excel/CSV, печатные реестры
 
 **Общее**
+
 - Тёмная/светлая тема, переключается кнопкой в верхней панели
 - Окно запоминает размер, выбранную вкладку и ширину панелей между
   запусками
@@ -111,7 +131,7 @@ pyinstaller --onefile --windowed --icon app_icon.ico --name GET-Passes pass_gene
 ## Файлы рядом с программой
 
 | Файл | Назначение |
-|---|---|
+| --- | --- |
 | `assets/logo_get.png` | фирменный знак ГЭТ. Единственный растровый элемент интерфейса и бланков; необязателен — без него подпись «ГЭТ» рисуется текстом |
 | `app_icon.ico` | иконка окна |
 | `fonts/` | брендбук-шрифт (`Moscow Sans` или `Echoes Sans`) и `DoT Icons` (пиктограммы трамвая/троллейбуса в печатных реестрах). Каталог может называться и `fronts/`. Необязательны |
