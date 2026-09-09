@@ -36,14 +36,50 @@ jobs:
       # компьютере. Если это случится — уберите шаг "Установить UPX" выше
       # и пересоберите: PyInstaller соберёт обычный (несжатый UPX) exe.
       - name: Собрать .exe
-        run: pyinstaller --onefile --windowed --icon app_icon.ico pass_generator.py
+        run: pyinstaller --onefile --windowed --icon app_icon.ico --name GET-Passes pass_generator.py
+
+      - name: Azure login
+        if: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' && secrets.AZURE_KEY_VAULT_NAME != '' && secrets.AZURE_SIGN_CERT_NAME != '' && secrets.AZURE_SIGN_CERT_PASSWORD != '' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Подписать EXE сертификатом из Azure Key Vault
+        if: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' && secrets.AZURE_KEY_VAULT_NAME != '' && secrets.AZURE_SIGN_CERT_NAME != '' && secrets.AZURE_SIGN_CERT_PASSWORD != '' }}
+        shell: pwsh
+        env:
+          AZURE_KEY_VAULT_NAME: ${{ secrets.AZURE_KEY_VAULT_NAME }}
+          AZURE_SIGN_CERT_NAME: ${{ secrets.AZURE_SIGN_CERT_NAME }}
+          AZURE_SIGN_CERT_PASSWORD: ${{ secrets.AZURE_SIGN_CERT_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          az keyvault secret download --vault-name "$env:AZURE_KEY_VAULT_NAME" --name "$env:AZURE_SIGN_CERT_NAME" --file "$pfxPath" --encoding base64
+
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match "x64" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+
+          if (-not $signtool) {
+            throw "signtool.exe not found"
+          }
+
+          & $signtool.FullName sign `
+            /fd SHA256 `
+            /tr http://timestamp.digicert.com `
+            /td SHA256 `
+            /f "$pfxPath" `
+            /p "$env:AZURE_SIGN_CERT_PASSWORD" `
+            /v "dist\GET-Passes.exe"
 
       - name: Собрать папку для переноса
         shell: pwsh
         run: |
           $out = "dist\GET-Passes"
           New-Item -ItemType Directory -Path $out -Force | Out-Null
-          Copy-Item dist\pass_generator.exe $out\
+          Copy-Item dist\GET-Passes.exe $out\
           Copy-Item app_icon.ico $out\
           if (Test-Path assets) { Copy-Item assets $out\assets -Recurse }
           if (Test-Path fonts) { Copy-Item fonts $out\fonts -Recurse }

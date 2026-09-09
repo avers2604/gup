@@ -6,14 +6,52 @@
 из Excel/CSV. Интерфейс — карточный дизайн на палитре брендбука ГЭТ,
 со светлой и тёмной темой.
 
-## Запуск
+## Запуск на Python
 
-```
-pip install -r requirements.txt
+```bash
+python -m venv .venv
+. .venv/bin/activate    # Linux/macOS
+# .venv\Scripts\activate   # Windows PowerShell
+
+python -m pip install -r requirements-dev.txt
 python pass_generator.py
 ```
 
-Требуется Python 3.10+ с `tkinter` (входит в стандартный установщик для Windows).
+Требуется Python 3.11+ с `tkinter` (входит в стандартную поставку Python для Windows).
+
+## Сборка в один EXE
+
+> Для выпуска единым исполняемым файлом лучше собирать проект на Windows, потому что приложение использует Tkinter и оконный режим.
+
+### Windows (локально)
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pip install pyinstaller
+pyinstaller --onefile --windowed --icon app_icon.ico --name GET-Passes pass_generator.py
+```
+
+После сборки исполняемый файл появится в папке `dist\GET-Passes.exe`.
+
+### Linux/macOS для проверки сборки
+
+В этом окружении сборка `PyInstaller` может не работать из-за отсутствия поддержки `tkinter`/shared library в системном Python. На Linux допустимо сборку проверять только в знакомой среде и обычно с `venv` на том же Python, где установлены системные зависимости, но для финального релиза лучший вариант остаётся Windows.
+
+### Рекомендуемая упаковка для релиза
+
+Если нужен именно единый `.exe`, оптимальная схема:
+
+1. собирать на `windows-latest` в GitHub Actions;
+2. включить `app_icon.ico` и ресурсы `assets/`/`fonts/` в артефакт;
+3. оставлять результат в одном zip-архиве рядом с `GET-Passes.exe`.
+
+Пример команды в GitHub Actions:
+
+```powershell
+pyinstaller --onefile --windowed --icon app_icon.ico --name GET-Passes pass_generator.py
+```
+
+Если проект запускается из папки с ресурсами, то иконка, логотип и шрифты находятся автоматически. При отсутствии ресурсов приложение продолжает работать в упрощённом режиме, но внешний вид будет базовым.
 
 ## Возможности
 
@@ -154,21 +192,20 @@ python -m pyflakes pass_generator.py getpass_core getpass_ui
 `pyflakes` ловит обращения к неопределённым именам до запуска — именно
 такой ошибкой (`NameError` на обработчике кнопки) программа падала раньше.
 
-## Сборка .exe
+## Автоматическая сборка в GitHub Actions
 
-Собирается только на Windows — PyInstaller не кросс-компилирует.
+Файл [`.github/workflows/build-exe.yml`](.github/workflows/build-exe.yml) собирает релизный архив на Windows при каждом push в `main` и может быть запущен вручную через Actions.
 
-```
-pyinstaller --onefile --windowed --icon app_icon.ico pass_generator.py
-```
+Что делается автоматически:
 
-Рядом с полученным `.exe` положите `app_icon.ico`, `assets/logo_get.png`
-и `fonts/` (все три — опциональны, но без них знак ГЭТ и брендбук-шрифт
-заменяются текстовой подписью и системным шрифтом). `template.png` не
-нужен — бланки строятся кодом.
+- устанавливается Python 3.11;
+- ставятся зависимости из [requirements.txt](requirements.txt);
+- устанавливается `pyinstaller`;
+- собирается единый `.exe` через `pyinstaller --onefile --windowed`;
+- копируются `app_icon.ico`, `assets/` и шрифты (`fonts/` или `fronts/`);
+- создаётся zip-архив `GET-Passes-windows.zip`;
+- архив выкладывается как артефакт и обновляет релиз `latest-build`.
 
-**Автоматическая сборка.** `.github/workflows/build-exe.yml` собирает
-`.exe` на серверах GitHub при каждом push в `main` (и вручную — вкладка
-Actions → Сборка .exe → Run workflow). Готовый архив `GET-Passes-windows.zip`
-берите на вкладке **Releases** (релиз `latest-build`, обновляется каждой
-сборкой) — не нужна ни Windows-машина, ни установленный Python.
+Для локального релизного выпуска достаточно запускать ту же команду на Windows-машине и упаковать полученный `GET-Passes.exe` вместе с ресурсами.
+
+> `template.png` не требуется: бланки рисуются программой напрямую.
