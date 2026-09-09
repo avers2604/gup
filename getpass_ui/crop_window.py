@@ -1,8 +1,15 @@
-"""Редактор кадрирования фотографии для бейджа."""
+"""Редактор кадрирования фотографии для бейджа.
+
+Рабочая область намеренно тёмная независимо от темы приложения — так
+удобнее оценивать кадр по лицу на фотографии, это обычная практика фото-
+редакторов. Акцентная кнопка и цвет рамки при этом взяты из фирменной
+палитры, чтобы инструмент не выглядел чужеродным вставками из другого набора.
+"""
 from __future__ import annotations
 
 import os
 import tkinter as tk
+from datetime import datetime
 from tkinter import filedialog, messagebox
 
 from PIL import Image, ImageTk
@@ -10,7 +17,7 @@ from PIL import Image, ImageTk
 from getpass_core.crop import compute_crop_from_state
 from getpass_core.dpi import fit_to_screen, scaled
 
-from .widgets import F
+from .theme import Theme
 
 #: желаемый размер области просмотра; ужимается, если экран меньше
 CANVAS_W, CANVAS_H = 700, 700
@@ -19,26 +26,35 @@ MIN_SCALE, MAX_SCALE = 1.0, 6.0
 #: сколько по высоте занимают панели кнопок и подсказка
 CHROME_H = 250
 
+# студийная тёмная палитра инструмента — не зависит от темы приложения
+STUDIO_BG = "#1B2130"
+STUDIO_PANEL = "#242B3D"
+STUDIO_CANVAS = "#0E1219"
+STUDIO_TEXT = "#E8EEF4"
+STUDIO_SHADE = "#0B1116"
 
-def open_crop_window(parent, image_path, on_apply, scale=1.0):
+
+def open_crop_window(parent, image_path, on_apply, theme: Theme):
     try:
         im = Image.open(image_path).convert("RGB")
     except Exception as exc:
         messagebox.showerror("Ошибка", f"Не удалось открыть фото:\n{exc}", parent=parent)
         return None
-    return CropWindow(parent, im, on_apply, scale)
+    return CropWindow(parent, im, on_apply, theme)
 
 
 class CropWindow:
-    def __init__(self, parent, im, on_apply, scale=1.0):
+    def __init__(self, parent, im, on_apply, theme: Theme):
         self.im = im
         self.on_apply = on_apply
+        self.theme = theme
         self.orig_w, self.orig_h = im.size
+        scale = theme.scale
 
         self.win = tk.Toplevel(parent)
         self.win.title("Кадрирование — колесо мыши: масштаб, ЛКМ: перемещение")
         self.win.transient(parent)
-        self.win.configure(bg="#22303C")
+        self.win.configure(bg=STUDIO_BG)
 
         # Раньше окно было жёстко 760x920. На ноутбуке с рабочей областью
         # ниже этого нижняя панель с кнопками «Сохранить и применить»
@@ -82,20 +98,25 @@ class CropWindow:
             pass
 
     def _build(self):
-        self.btn_bar = tk.Frame(self.win, bg="#22303C")
-        self.btn_bar.pack(side="bottom", fill="x", padx=16, pady=(6, 14))
-        self.zoom_bar = tk.Frame(self.win, bg="#22303C")
-        self.zoom_bar.pack(side="bottom", fill="x", padx=16, pady=4)
+        th = self.theme
+        accent = th.c("accent_fill")
+        danger = th.c("danger")
+
+        self.btn_bar = tk.Frame(self.win, bg=STUDIO_BG)
+        self.btn_bar.pack(side="bottom", fill="x", padx=th.sp(4), pady=(th.sp(2), th.sp(4)))
+        self.zoom_bar = tk.Frame(self.win, bg=STUDIO_BG)
+        self.zoom_bar.pack(side="bottom", fill="x", padx=th.sp(4), pady=th.sp(1))
         tk.Label(self.win,
-                 text="🖱 Колесо — масштаб  •  ЛКМ и тяните — перемещение  •  "
-                      "Лицо должно быть в красной рамке",
-                 bg="#22303C", fg="#E8EEF4", font=F(10)).pack(side="bottom", fill="x",
-                                                              pady=(8, 4))
+                 text="Колесо мыши — масштаб   •   ЛКМ и тяните — перемещение   •   "
+                      "Лицо должно быть в рамке",
+                 bg=STUDIO_BG, fg=STUDIO_TEXT, font=th.font("body")).pack(
+            side="bottom", fill="x", pady=(th.sp(2), th.sp(1)))
         self.c = tk.Canvas(self.win, width=self.canvas_w, height=self.canvas_h,
-                           bg="#141A20", highlightthickness=0)
-        self.c.pack(side="top", fill="both", expand=True, padx=10, pady=(10, 0))
-        self.zoom_lbl = tk.Label(self.win, text="Масштаб: 100%", bg="#22303C",
-                                 fg="#FFD54F", font=F(10, True), width=16)
+                           bg=STUDIO_CANVAS, highlightthickness=0)
+        self.c.pack(side="top", fill="both", expand=True, padx=th.sp(2), pady=(th.sp(2), 0))
+        self.zoom_lbl = tk.Label(self.win, text="Масштаб: 100%", bg=STUDIO_BG,
+                                 fg=th.c("warning"), font=th.font("body", bold=True),
+                                 width=16)
 
         self.c.bind("<MouseWheel>", self._on_wheel)
         self.c.bind("<Button-4>", lambda e: self.zoom(1.12))
@@ -104,23 +125,30 @@ class CropWindow:
         self.c.bind("<B1-Motion>", self._on_drag)
         self.c.bind("<ButtonRelease-1>", self._on_release)
 
-        for text, cmd, color in (("➖  Уменьшить", lambda: self.zoom(0.85), "#C0392B"),
-                                 ("↺  Сброс", self.reset, "#546E7A"),
-                                 ("➕  Увеличить", lambda: self.zoom(1.15), "#27AE60")):
-            tk.Button(self.zoom_bar, text=text, command=cmd, bg=color, fg="white",
-                      font=F(10, True), padx=12, pady=5, relief="flat",
-                      cursor="hand2").pack(side="left", padx=3)
-        self.zoom_lbl.pack(side="left", padx=10)
+        for text, cmd in (("–  Уменьшить", lambda: self.zoom(0.85)),
+                          ("↺  Сброс", self.reset),
+                          ("+  Увеличить", lambda: self.zoom(1.15))):
+            tk.Button(self.zoom_bar, text=text, command=cmd, bg=STUDIO_PANEL,
+                      fg=STUDIO_TEXT, font=th.font("body", bold=True),
+                      padx=th.px(12), pady=th.px(5), relief="flat", bd=0,
+                      activebackground=th.c("line_strong"), activeforeground=STUDIO_TEXT,
+                      cursor="hand2").pack(side="left", padx=th.px(3))
+        self.zoom_lbl.pack(side="left", padx=th.sp(3))
 
-        tk.Button(self.btn_bar, text="💾  СОХРАНИТЬ И ПРИМЕНИТЬ", command=self.save_and_apply,
-                  bg="#27AE60", fg="white", font=F(12, True), pady=11, relief="flat",
-                  cursor="hand2").pack(side="left", fill="x", expand=True, padx=(0, 6))
-        tk.Button(self.btn_bar, text="📁  Сохранить как файл...", command=self.save_as_file,
-                  bg="#1565C0", fg="white", font=F(11, True), pady=11, padx=14,
-                  relief="flat", cursor="hand2").pack(side="left", padx=(0, 6))
-        tk.Button(self.btn_bar, text="❌  Отмена", command=self.win.destroy,
-                  bg="#455A64", fg="white", font=F(11), pady=11, padx=14,
-                  relief="flat", cursor="hand2").pack(side="right")
+        tk.Button(self.btn_bar, text="СОХРАНИТЬ И ПРИМЕНИТЬ", command=self.save_and_apply,
+                  bg=accent, fg="#FFFFFF", font=th.font("heading"), pady=th.px(11),
+                  relief="flat", bd=0, activebackground=th.c("accent_fill_hover"),
+                  activeforeground="#FFFFFF", cursor="hand2"
+                  ).pack(side="left", fill="x", expand=True, padx=(0, th.sp(2)))
+        tk.Button(self.btn_bar, text="Сохранить как файл...", command=self.save_as_file,
+                  bg=STUDIO_PANEL, fg=STUDIO_TEXT, font=th.font("body", bold=True),
+                  pady=th.px(11), padx=th.px(14), relief="flat", bd=0,
+                  activebackground=th.c("line_strong"), activeforeground=STUDIO_TEXT,
+                  cursor="hand2").pack(side="left", padx=(0, th.sp(2)))
+        tk.Button(self.btn_bar, text="Отмена", command=self.win.destroy,
+                  bg=STUDIO_BG, fg=danger, font=th.font("body"), pady=th.px(11),
+                  padx=th.px(14), relief="flat", bd=0, activebackground=STUDIO_PANEL,
+                  activeforeground=danger, cursor="hand2").pack(side="right")
 
     # ------------------------------------------------------ рисование
 
@@ -142,14 +170,14 @@ class CropWindow:
         self.zoom_lbl.config(text=f"Масштаб: {int(self.state['scale'] * 100)}%")
 
     def draw_frame_overlay(self):
+        th = self.theme
         self.c.delete("frame")
         fx, fy, fw, fh = self.frame_box
-        shade = "#0B1116"
         for box in ((0, 0, self.canvas_w, fy), (0, fy + fh, self.canvas_w, self.canvas_h),
                     (0, fy, fx, fy + fh), (fx + fw, fy, self.canvas_w, fy + fh)):
-            self.c.create_rectangle(*box, fill=shade, stipple="gray50",
+            self.c.create_rectangle(*box, fill=STUDIO_SHADE, stipple="gray50",
                                     outline="", tags="frame")
-        self.c.create_rectangle(fx, fy, fx + fw, fy + fh, outline="#E53935",
+        self.c.create_rectangle(fx, fy, fx + fw, fy + fh, outline=th.c("danger"),
                                 width=4, tags="frame")
         for i in (1, 2):
             self.c.create_line(fx + i * fw / 3, fy, fx + i * fw / 3, fy + fh,
@@ -157,8 +185,8 @@ class CropWindow:
             self.c.create_line(fx, fy + i * fh / 3, fx + fw, fy + i * fh / 3,
                                fill="#FFFFFF", width=1, tags="frame")
         self.c.create_text(self.canvas_w // 2, max(14, fy - 18),
-                           text="ОБЛАСТЬ ФОТО НА БЕЙДЖЕ (3:4)", fill="#FF8A80",
-                           font=F(10, True), tags="frame")
+                           text="ОБЛАСТЬ ФОТО НА БЕЙДЖЕ (3:4)", fill=th.c("danger"),
+                           font=th.font("body", bold=True), tags="frame")
 
     # ------------------------------------------------------- события
 
@@ -234,7 +262,6 @@ def store_photo(cropped, photo_dir, tab_num=""):
     """
     os.makedirs(photo_dir, exist_ok=True)
     safe = "".join(ch for ch in (tab_num or "") if ch.isalnum()) or "photo"
-    from datetime import datetime
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = os.path.join(photo_dir, f"{safe}_{stamp}.jpg")
     cropped.save(path, "JPEG", quality=95, dpi=(300, 300))

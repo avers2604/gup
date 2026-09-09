@@ -1,4 +1,4 @@
-"""Форма одного пропуска на ТС.
+"""Форма одного пропуска на ТС — карточная компоновка (вариант В).
 
 Раньше каждая из двух вкладок раскладывалась в 12 отдельных глобальных
 переменных (p1_num, p1_plate_var, ... p2_...). Теперь это объект с методом
@@ -7,87 +7,97 @@ data(), и функции печати больше не зависят от с�
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
 
 from getpass_core.domain import increment_number, normalize_plate
 from getpass_core.storage import lookup_car
 
-from .widgets import CLR_CARD, CLR_NAVY, F
+from .components import AutocompleteEntry, Field, hbox, section_title
+from .theme import Theme
 
-TERRITORIES = ["", 'ПТО "Шаврова"', "Парковка", 'ПТО "Шаврова", Парковка']
+TERRITORIES = ['ПТО "Шаврова"', "Парковка", 'ПТО "Шаврова", Парковка']
 
 
 class PassForm:
     """Виджеты и данные одной вкладки «Пропуск №N»."""
 
-    def __init__(self, parent, default_num, on_change, is_second=False,
-                 default_territory="", peer_getter=None):
+    def __init__(self, parent, theme: Theme, default_num, on_change, is_second=False,
+                 default_territory="", peer_getter=None, zones_source=None,
+                 makes_source=None):
+        self.theme = theme
         self.on_change = on_change
         self.peer_getter = peer_getter
-        self.frame = tk.Frame(parent, bg=CLR_CARD, padx=12, pady=8)
+        self._zones_source = zones_source or (lambda: TERRITORIES)
+        self._makes_source = makes_source or (lambda: [])
+        # родитель — ttk.Notebook, у него нет опции -bg; фон страницы всегда
+        # совпадает с фоном карточки, в которую вложен этот блок
+        bg = theme.c("surface")
+        self.frame = tk.Frame(parent, bg=bg)
+        pad = tk.Frame(self.frame, bg=bg)
+        pad.pack(fill="both", expand=True, padx=theme.sp(3), pady=theme.sp(3))
 
-        top = tk.Frame(self.frame, bg=CLR_CARD)
-        top.pack(fill="x", pady=(0, 4))
-        tk.Label(top, text="Номер бланка:", font=F(9, True), bg=CLR_CARD,
-                 fg="#334E68").pack(side="left")
-        self.num = ttk.Entry(top, width=12, font=F(10, True))
+        top = hbox(pad, theme)
+        tk.Label(top, text="№ бланка:", bg=bg, fg=theme.c("ink_muted"),
+                 font=theme.font("caption")).pack(side="left")
+        self.num = tk.Entry(top, width=10, font=theme.font("data"),
+                            bg=theme.c("surface_alt"), fg=theme.c("ink"),
+                            relief="flat", insertbackground=theme.c("ink"))
         self.num.insert(0, default_num)
-        self.num.pack(side="left", padx=(6, 12))
+        self.num.pack(side="left", padx=(theme.sp(2), theme.sp(3)), ipady=theme.px(3))
         if is_second:
             tk.Button(top, text="⚡ №1 + 1", command=self._sync_from_peer,
-                      bg="#E2E8F0", fg="#102A43", font=F(8, True), relief="flat",
-                      padx=6, cursor="hand2").pack(side="left", padx=(0, 15))
-        tk.Label(top, text="Зона допуска:", font=F(9, True), bg=CLR_CARD,
-                 fg="#334E68").pack(side="left")
-        self.territory = ttk.Combobox(top, values=TERRITORIES, state="normal", font=F(9))
-        self.territory.set(default_territory)
-        self.territory.pack(side="left", fill="x", expand=True, padx=(6, 0))
+                      bg=theme.c("surface_alt"), fg=theme.c("ink_muted"),
+                      font=theme.font("caption"), relief="flat", padx=theme.px(6),
+                      cursor="hand2", activebackground=theme.c("line")
+                      ).pack(side="left", padx=(0, theme.sp(3)))
 
-        plate_box = tk.LabelFrame(self.frame,
-                                  text=" Государственный регистрационный знак ТС ",
-                                  font=F(9, True), bg=CLR_CARD, fg=CLR_NAVY,
-                                  padx=8, pady=4)
-        plate_box.pack(fill="x", pady=(0, 4))
+        self.plate = Field(pad, theme, "Государственный регистрационный знак",
+                           required=True)
+        self.plate.pack(fill="x", pady=(theme.sp(2), theme.sp(3)))
+        self.plate.configure_field(font=theme.font("data"))
         self.plate_var = tk.StringVar()
+        self.plate.widget.configure(textvariable=self.plate_var)
         self.plate_var.trace_add("write", self._force_caps)
-        self.plate = ttk.Entry(plate_box, textvariable=self.plate_var, font=F(13, True))
-        self.plate.pack(fill="x")
 
-        row1 = tk.Frame(self.frame, bg=CLR_CARD)
-        row1.pack(fill="x", pady=2)
-        self.brand = self._labeled_entry(row1, "Марка:", 8, expand=True, pad=(0, 10))
-        self.type = self._labeled_entry(row1, "Вид:", 5, expand=True)
-        row2 = tk.Frame(self.frame, bg=CLR_CARD)
-        row2.pack(fill="x", pady=2)
-        self.model = self._labeled_entry(row2, "Модель:", 8, expand=True, pad=(0, 10))
-        self.color = self._labeled_entry(row2, "Цвет:", 5, expand=True)
+        row1 = hbox(pad, theme)
+        self.brand = AutocompleteEntry(row1, theme, "Марка", self._makes_source)
+        self.brand.pack(side="left", fill="x", expand=True, padx=(0, theme.sp(3)))
+        self.type = Field(row1, theme, "Вид")
+        self.type.pack(side="left", fill="x", expand=True)
 
-        driver = tk.LabelFrame(self.frame, text=" Водитель (управляющий ТС) ",
-                               font=F(9, True), bg=CLR_CARD, fg=CLR_NAVY, padx=8, pady=4)
-        driver.pack(fill="x", pady=(4, 2))
-        rd1 = tk.Frame(driver, bg=CLR_CARD)
-        rd1.pack(fill="x", pady=(0, 2))
-        self.d_pos = self._labeled_entry(rd1, "Должность:", 11, expand=True)
-        rd2 = tk.Frame(driver, bg=CLR_CARD)
-        rd2.pack(fill="x")
-        self.d_fio = self._labeled_entry(rd2, "ФИО:", 11, expand=True, pad=(0, 10))
-        tk.Label(rd2, text="Телефон:", bg=CLR_CARD, fg="#486581",
-                 font=F(9)).pack(side="left")
-        self.d_phone = ttk.Entry(rd2, width=17, font=F(9))
-        self.d_phone.pack(side="left", padx=(4, 0))
+        row2 = hbox(pad, theme, pady=(theme.sp(3), 0))
+        self.model = Field(row2, theme, "Модель")
+        self.model.pack(side="left", fill="x", expand=True, padx=(0, theme.sp(3)))
+        self.color = Field(row2, theme, "Цвет")
+        self.color.pack(side="left", fill="x", expand=True)
+
+        section_title(pad, theme, "Водитель").pack(anchor="w",
+                                                    pady=(theme.sp(4), theme.sp(2)))
+        self.d_pos = Field(pad, theme, "Должность")
+        self.d_pos.pack(fill="x", pady=(0, theme.sp(3)))
+        row3 = hbox(pad, theme)
+        self.d_fio = Field(row3, theme, "ФИО")
+        self.d_fio.pack(side="left", fill="x", expand=True, padx=(0, theme.sp(3)))
+        self.d_phone = Field(row3, theme, "Телефон", width=15)
+        self.d_phone.pack(side="left")
+
+        self.territory = Field(pad, theme, "Зона допуска", kind="combobox",
+                               values=self._zones_source())
+        self.territory.pack(fill="x", pady=(theme.sp(4), 0))
+        self.territory.set(default_territory)
 
         self.plate.bind("<FocusOut>", lambda e: self.autocomplete())
         for widget in self.entries():
             widget.bind("<KeyRelease>", self.on_change, add="+")
         self.territory.bind("<<ComboboxSelected>>", self.on_change, add="+")
         self.territory.bind("<KeyRelease>", self.on_change, add="+")
+        self.num.bind("<KeyRelease>", self.on_change, add="+")
 
-    def _labeled_entry(self, parent, label, width, expand=False, pad=(0, 0)):
-        tk.Label(parent, text=label, width=width, bg=CLR_CARD, anchor="w",
-                 fg="#486581", font=F(9)).pack(side="left")
-        entry = ttk.Entry(parent, font=F(9))
-        entry.pack(side="left", fill="x", expand=expand, padx=pad)
-        return entry
+    def refresh_suggestions(self):
+        """Перечитать списки автодополнения (зоны, марки) из актуальных данных."""
+        try:
+            self.territory.widget.configure(values=self._zones_source())
+        except Exception:
+            pass
 
     # ------------------------------------------------------ поведение
 
@@ -96,6 +106,7 @@ class PassForm:
         if val and val != val.upper():
             self.plate_var.set(val.upper())
             return          # trace вызовется повторно — не дёргаем предпросмотр дважды
+        self.plate.validate()
         self.on_change()
 
     def _sync_from_peer(self):
@@ -106,7 +117,7 @@ class PassForm:
         self.on_change()
 
     def entries(self):
-        return [self.num, self.plate, self.brand, self.type, self.model,
+        return [self.plate, self.brand, self.type, self.model,
                 self.color, self.d_pos, self.d_fio, self.d_phone]
 
     def autocomplete(self):
@@ -163,3 +174,9 @@ class PassForm:
                        self.d_pos, self.d_fio, self.d_phone):
             widget.delete(0, tk.END)
         self.territory.set(default_territory)
+        for widget in self.entries():
+            widget.validate()
+
+    def validate_required(self) -> bool:
+        """Подсветить незаполненные обязательные поля. True — форма годна."""
+        return self.plate.validate()

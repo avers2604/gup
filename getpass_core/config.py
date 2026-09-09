@@ -190,6 +190,11 @@ DEFAULT_SETTINGS = {
     "last_printer": "По умолчанию",
     "auto_preview_target": "1",
     "warn_duplicates": True,
+    "theme": "light",
+    "window_geometry": "",
+    "active_tab": 0,
+    "pass_paned_width": 0,
+    "badge_paned_width": 0,
 }
 
 

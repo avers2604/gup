@@ -188,8 +188,41 @@ class Theme:
         self.style.configure("TSeparator", background=p.line)
         self.style.configure("TProgressbar", background=p.accent,
                              troughcolor=p.surface_alt, borderwidth=0)
-        self.style.configure("TCheckbutton", background=p.surface, foreground=p.ink)
-        self.style.configure("TRadiobutton", background=p.surface, foreground=p.ink)
+        self.style.configure("TCheckbutton", background=p.surface, foreground=p.ink,
+                             font=self.font("body"))
+        self.style.map("TCheckbutton", background=[("active", p.surface)])
+        self.style.configure("Warning.TCheckbutton", background=p.surface,
+                             foreground=p.danger, font=self.font("body", bold=True))
+        self.style.map("Warning.TCheckbutton", background=[("active", p.surface)])
+        self.style.configure("TRadiobutton", background=p.surface, foreground=p.ink,
+                             font=self.font("body"))
+        self.style.map("TRadiobutton", background=[("active", p.surface)])
+
+        # вкладки: главный переключатель разделов программы
+        self.style.configure("TNotebook", background=p.ground, borderwidth=0,
+                             tabmargins=(0, 0, 0, 0))
+        self.style.configure("TNotebook.Tab", background=p.surface_alt,
+                             foreground=p.ink_muted, font=self.font("body", bold=True),
+                             padding=(self.px(20), self.px(10)), borderwidth=0)
+        self.style.map("TNotebook.Tab",
+                       background=[("selected", p.primary), ("active", p.line)],
+                       foreground=[("selected", p.on_primary), ("active", p.ink)])
+
+        # вложенные вкладки внутри карточки (Пропуск №1 / №2)
+        self.style.configure("Inner.TNotebook", background=p.surface, borderwidth=0)
+        self.style.configure("Inner.TNotebook.Tab", background=p.surface_alt,
+                             foreground=p.ink_muted, font=self.font("caption", bold=True),
+                             padding=(self.px(14), self.px(7)), borderwidth=0)
+        self.style.map("Inner.TNotebook.Tab",
+                       background=[("selected", p.accent_fill), ("active", p.line)],
+                       foreground=[("selected", "#FFFFFF"), ("active", p.ink)])
+
+        # попап списка Combobox — не подчиняется ttk-стилям напрямую
+        self.root.option_add("*TCombobox*Listbox.background", p.surface)
+        self.root.option_add("*TCombobox*Listbox.foreground", p.ink)
+        self.root.option_add("*TCombobox*Listbox.selectBackground", p.accent_fill)
+        self.root.option_add("*TCombobox*Listbox.selectForeground", "#FFFFFF")
+        self.root.option_add("*TCombobox*Listbox.font", self.font("body"))
 
     # ───────────────────────────── утилиты окон
 
@@ -198,6 +231,23 @@ class Theme:
             window.configure(bg=self.palette.ground)
         except tk.TclError:
             pass
+
+    def toplevel(self, parent: tk.Misc, title: str, resizable=(True, True)) -> tk.Toplevel:
+        """Дочернее окно на полотне текущей темы, привязанное к владельцу."""
+        win = tk.Toplevel(parent)
+        win.title(title)
+        win.configure(bg=self.palette.ground)
+        win.resizable(*resizable)
+        win.transient(parent.winfo_toplevel() if hasattr(parent, "winfo_toplevel") else parent)
+        return win
+
+    def check(self, parent, text, variable, style="TCheckbutton", **kw):
+        return ttk.Checkbutton(parent, text=text, variable=variable,
+                               style=style, **kw)
+
+    def radio(self, parent, text, variable, value, style="TRadiobutton", **kw):
+        return ttk.Radiobutton(parent, text=text, variable=variable, value=value,
+                               style=style, **kw)
 
 
 class Card(tk.Frame):

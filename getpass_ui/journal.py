@@ -1,4 +1,9 @@
-"""Окно журнала. Одно на оба журнала — раньше это были две копии по 89 строк."""
+"""Окно журнала. Одно на оба журнала — раньше это были две копии по 89 строк.
+
+Фильтры: текстовый поиск, статус, диапазон дат выдачи, а для полей, которые
+есть в конкретной схеме — зона допуска / подразделение (список фактических
+значений) и водитель / должность.
+"""
 from __future__ import annotations
 
 import os
@@ -9,24 +14,37 @@ from tkinter import messagebox, simpledialog, ttk
 from getpass_core.domain import parse_date
 from getpass_core.storage import STATUS_REVOKED, FileBusy
 
-from .widgets import F, styled_button
+from .components import Field, section_title
+from .theme import Theme
+
+#: какие поля схемы можно фильтровать дополнительно, и как их показывать
+_EXTRA_FILTERS = {
+    "zone": ("combobox", "Зона допуска"),
+    "park": ("combobox", "Подразделение"),
+    "role": ("combobox", "Должность"),
+    "driver": ("entry", "Водитель"),
+}
 
 
-def open_journal_window(parent, journal, title):
-    JournalWindow(parent, journal, title)
+def open_journal_window(parent, journal, title, theme: Theme):
+    JournalWindow(parent, journal, title, theme)
 
 
 class JournalWindow:
-    def __init__(self, parent, journal, title):
+    def __init__(self, parent, journal, title, theme: Theme):
         self.journal = journal
         self.schema = journal.schema
+        self.theme = theme
         self.records = journal.read()
+        self.sort_key = None
+        self.sort_reverse = False
+        self._extra_widgets = {}   # key -> Field
 
-        self.win = tk.Toplevel(parent)
-        self.win.title(title)
-        self.win.geometry("1250x640")
-        self.win.minsize(960, 460)
-        self.win.transient(parent)
+        th = theme
+        self.win = th.toplevel(parent, title)
+        w, h = int(1280 * th.scale), int(700 * th.scale)
+        self.win.geometry(f"{w}x{h}")
+        self.win.minsize(int(980 * th.scale), int(480 * th.scale))
 
         self._build_filters()
         self._build_tree()
@@ -36,23 +54,60 @@ class JournalWindow:
     # ------------------------------------------------------ разметка
 
     def _build_filters(self):
-        bar = ttk.Frame(self.win, padding="10")
-        bar.pack(fill="x")
-        ttk.Label(bar, text="🔍 Поиск:").pack(side="left", padx=(0, 5))
+        th = self.theme
+        bar = tk.Frame(self.win, bg=th.c("ground"))
+        bar.pack(fill="x", padx=th.sp(3), pady=(th.sp(3), 0))
+
+        row1 = tk.Frame(bar, bg=th.c("ground"))
+        row1.pack(fill="x", pady=(0, th.sp(2)))
+        self.search_field = Field(row1, th, "Поиск")
+        self.search_field.pack(side="left", padx=(0, th.sp(4)))
+        self.search_field.configure_field(width=28)
         self.search_var = tk.StringVar()
-        ttk.Entry(bar, textvariable=self.search_var, width=30).pack(side="left")
+        self.search_field.widget.configure(textvariable=self.search_var)
+
+        status_box = tk.Frame(row1, bg=th.c("ground"))
+        status_box.pack(side="left")
+        section_title(status_box, th, "Статус").pack(anchor="w")
+        radios = tk.Frame(status_box, bg=th.c("ground"))
+        radios.pack(anchor="w", pady=(th.sp(1), 0))
         self.filter_var = tk.StringVar(value="active")
         for text, value in (("Все", "all"), ("Действующие", "active"),
                             ("Просроченные", "expired"), ("Аннулированные", "revoked"),
                             ("Без срока", "unknown")):
-            ttk.Radiobutton(bar, text=text, variable=self.filter_var,
-                            value=value).pack(side="left", padx=5)
+            th.radio(radios, text, self.filter_var, value).pack(side="left",
+                                                                 padx=(0, th.sp(2)))
+
+        row2 = tk.Frame(bar, bg=th.c("ground"))
+        row2.pack(fill="x", pady=(0, th.sp(2)))
+        self.date_from = Field(row2, th, "Дата выдачи с", width=11)
+        self.date_from.pack(side="left", padx=(0, th.sp(2)))
+        self.date_to = Field(row2, th, "по", width=11)
+        self.date_to.pack(side="left", padx=(0, th.sp(4)))
+
+        for key, (kind, label) in _EXTRA_FILTERS.items():
+            if key not in self.schema.keys:
+                continue
+            if kind == "combobox":
+                values = [""] + self.journal.distinct(key)
+                field = Field(row2, th, label, kind="combobox", values=values)
+                field.set("")
+            else:
+                field = Field(row2, th, label, width=20)
+            field.pack(side="left", padx=(0, th.sp(3)))
+            field.bind("<KeyRelease>", self.apply_filter, add="+")
+            field.bind("<<ComboboxSelected>>", self.apply_filter, add="+")
+            self._extra_widgets[key] = field
+
         self.search_var.trace_add("write", self.apply_filter)
         self.filter_var.trace_add("write", self.apply_filter)
+        self.date_from.bind("<KeyRelease>", self.apply_filter, add="+")
+        self.date_to.bind("<KeyRelease>", self.apply_filter, add="+")
 
     def _build_tree(self):
-        frame = ttk.Frame(self.win, padding="10")
-        frame.pack(fill="both", expand=True)
+        th = self.theme
+        frame = tk.Frame(self.win, bg=th.c("ground"))
+        frame.pack(fill="both", expand=True, padx=th.sp(3), pady=th.sp(2))
         self.visible_fields = [f for f in self.schema.fields if f.tree_width > 0]
         columns = [f.key for f in self.visible_fields]
         self.tree = ttk.Treeview(frame, columns=columns, show="headings",
@@ -60,39 +115,54 @@ class JournalWindow:
         for f in self.visible_fields:
             self.tree.heading(f.key, text=f.title,
                               command=lambda k=f.key: self._sort_by(k))
-            self.tree.column(f.key, width=f.tree_width, anchor=f.anchor)
+            self.tree.column(f.key, width=th.px(f.tree_width), anchor=f.anchor)
         scroll = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
-        self.tree.tag_configure("revoked", foreground="#9AA5B1")
-        self.tree.tag_configure("expired", foreground="#C62828")
-        self.tree.tag_configure("unknown", background="#FFF4E5")
+        self.tree.tag_configure("revoked", foreground=th.c("ink_faint"))
+        self.tree.tag_configure("expired", foreground=th.c("danger"))
+        self.tree.tag_configure("unknown", background=th.c("surface_alt"))
         self.tree.bind("<Double-1>", lambda e: self.edit_selected())
 
     def _build_buttons(self):
-        bar = ttk.Frame(self.win, padding="10")
-        bar.pack(fill="x")
-        self.status = ttk.Label(bar, text="", font=F(9, True))
+        th = self.theme
+        bar = tk.Frame(self.win, bg=th.c("ground"))
+        bar.pack(fill="x", padx=th.sp(3), pady=(0, th.sp(3)))
+        self.status = tk.Label(bar, bg=th.c("ground"), fg=th.c("ink_muted"),
+                               font=th.font("caption"))
         self.status.pack(side="left")
-        styled_button(bar, "✏️ Изменить", self.edit_selected, "#1976D2",
-                      padx=12, pady=6).pack(side="left", padx=(14, 6))
-        styled_button(bar, "📄 Открыть в Excel", self.open_excel, "#2E7D32",
-                      padx=12, pady=6).pack(side="right")
-        styled_button(bar, "❌ Удалить", self.delete_selected, "#C62828",
-                      padx=12, pady=6).pack(side="right", padx=(0, 6))
-        styled_button(bar, "🚫 Аннулировать", self.revoke_selected, "#EF6C00",
-                      padx=12, pady=6).pack(side="right", padx=(0, 6))
+        ttk.Button(bar, text="Изменить", command=self.edit_selected,
+                  style="Ghost.TButton").pack(side="left", padx=(th.sp(4), th.sp(2)))
+        ttk.Button(bar, text="Открыть в Excel", command=self.open_excel,
+                  style="Ghost.TButton").pack(side="right")
+        ttk.Button(bar, text="Удалить", command=self.delete_selected,
+                  style="Danger.TButton").pack(side="right", padx=(0, th.sp(2)))
+        ttk.Button(bar, text="Аннулировать", command=self.revoke_selected,
+                  style="Ghost.TButton").pack(side="right", padx=(0, th.sp(2)))
 
     # ------------------------------------------------------- выборка
 
     def _sort_by(self, key):
-        self.records.sort(key=lambda r: (r.get(key) or "").lower())
+        if self.sort_key == key:
+            self.sort_reverse = not self.sort_reverse
+        else:
+            self.sort_key, self.sort_reverse = key, False
+        self.records.sort(key=lambda r: (r.get(key) or "").lower(),
+                          reverse=self.sort_reverse)
+        for f in self.visible_fields:
+            arrow = ""
+            if f.key == self.sort_key:
+                arrow = "  ▼" if self.sort_reverse else "  ▲"
+            self.tree.heading(f.key, text=f.title + arrow)
         self.apply_filter()
 
     def apply_filter(self, *_args):
         query = self.search_var.get().lower().strip()
         mode = self.filter_var.get()
+        d_from = parse_date(self.date_from.get())
+        d_to = parse_date(self.date_to.get())
+        extras = {k: w.get().strip() for k, w in self._extra_widgets.items()}
         today = datetime.now().date()
         self.tree.delete(*self.tree.get_children())
         shown = 0
@@ -102,13 +172,42 @@ class JournalWindow:
             state = self._state_of(rec, today)
             if mode != "all" and state != mode:
                 continue
-            values = [rec.get(f.key, "") for f in self.visible_fields]
+            issue = parse_date(rec.get("issue_date"))
+            if d_from and (issue is None or issue.date() < d_from.date()):
+                continue
+            if d_to and (issue is None or issue.date() > d_to.date()):
+                continue
+            skip = False
+            for key, val in extras.items():
+                if not val:
+                    continue
+                cell = (rec.get(key) or "")
+                kind = _EXTRA_FILTERS[key][0]
+                if kind == "combobox":
+                    if cell != val:
+                        skip = True
+                        break
+                elif val.lower() not in cell.lower():
+                    skip = True
+                    break
+            if skip:
+                continue
+            values = [self._display(rec, f.key, state) for f in self.visible_fields]
             self.tree.insert("", "end", iid=rec["id"], values=values,
                              tags=(state,) if state != "active" else ())
             shown += 1
         self.status.config(
             text=f"Показано: {shown} из {len(self.records)}   "
                  f"(журнал: {self.schema.name})")
+
+    #: цвет строки уже показывает срок — здесь дублируем это текстом,
+    #: чтобы состояние читалось и без цвета (печать, дальтонизм)
+    _STATE_LABEL = {"expired": "просрочен", "unknown": "нет срока"}
+
+    def _display(self, rec, key, state):
+        if key == "status" and state in self._STATE_LABEL:
+            return self._STATE_LABEL[state]
+        return rec.get(key, "")
 
     @staticmethod
     def _state_of(rec, today):
@@ -122,12 +221,21 @@ class JournalWindow:
     def _selected_ids(self):
         return list(self.tree.selection())
 
+    def refresh_filter_sources(self):
+        """Перечитать списки значений для выпадающих фильтров."""
+        for key, field in self._extra_widgets.items():
+            if _EXTRA_FILTERS[key][0] == "combobox":
+                current = field.get()
+                field.widget.configure(values=[""] + self.journal.distinct(key))
+                field.set(current)
+
     # ------------------------------------------------------ действия
 
     def _save(self, action, *args):
         """Выполнить операцию журнала, показав внятную ошибку при занятом файле."""
         try:
             self.records = action(*args)
+            self.refresh_filter_sources()
             return True
         except FileBusy as exc:
             messagebox.showerror(
@@ -175,7 +283,7 @@ class JournalWindow:
         rec = next((r for r in self.records if r["id"] == ids[0]), None)
         if rec is None:
             return
-        EditRecordDialog(self.win, self.schema, rec, self._on_edited)
+        EditRecordDialog(self.win, self.theme, self.schema, rec, self._on_edited)
 
     def _on_edited(self, rec_id, values):
         if self._save(self.journal.update_record, rec_id, values):
@@ -201,34 +309,27 @@ class JournalWindow:
 
 
 class EditRecordDialog:
-    def __init__(self, parent, schema, rec, on_save):
+    def __init__(self, parent, theme: Theme, schema, rec, on_save):
         self.rec = rec
         self.on_save = on_save
-        self.win = tk.Toplevel(parent)
-        self.win.title("Редактирование записи")
-        self.win.geometry("620x520")
-        self.win.transient(parent)
+        th = theme
+        self.win = th.toplevel(parent, "Редактирование записи", resizable=(False, False))
         self.win.grab_set()
-        frame = ttk.Frame(self.win, padding=20)
-        frame.pack(fill="both", expand=True)
+        pad = tk.Frame(self.win, bg=th.c("ground"))
+        pad.pack(fill="both", expand=True, padx=th.sp(4), pady=th.sp(4))
         self.entries = {}
-        row = 0
         for f in schema.fields:
             if f.key == "id":
                 continue
-            ttk.Label(frame, text=f.title, font=F(9, True)).grid(
-                row=row, column=0, sticky="w", pady=4)
-            entry = ttk.Entry(frame, width=44, font=F(10))
-            entry.grid(row=row, column=1, pady=4, sticky="w")
-            entry.insert(0, rec.get(f.key, ""))
+            entry = Field(pad, th, f.title, width=44)
+            entry.pack(fill="x", pady=(0, th.sp(2)))
+            entry.set(rec.get(f.key, ""))
             self.entries[f.key] = entry
-            row += 1
-        ttk.Label(frame, text=f"ID записи: {rec.get('id','')}",
-                  font=F(8, italic=True), foreground="#829AB1").grid(
-            row=row, column=0, columnspan=2, sticky="w", pady=(10, 0))
-        styled_button(frame, "💾 Сохранить изменения", self._save, "#2E7D32",
-                      font=F(10, True), pady=6).grid(
-            row=row + 1, column=0, columnspan=2, pady=18, sticky="ew")
+        tk.Label(pad, text=f"ID записи: {rec.get('id','')}", bg=th.c("ground"),
+                 fg=th.c("ink_faint"), font=th.font("caption")).pack(
+            anchor="w", pady=(th.sp(2), th.sp(3)))
+        ttk.Button(pad, text="Сохранить изменения", command=self._save,
+                  style="Primary.TButton").pack(fill="x")
 
     def _save(self):
         values = {k: e.get().strip() for k, e in self.entries.items()}

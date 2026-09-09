@@ -15,18 +15,19 @@ from getpass_core.dpi import (apply_scaling, enable_dpi_awareness, fit_to_screen
 from getpass_core import render as R
 from getpass_core.domain import (add_months_safe, add_years_safe, format_date,
                                  next_number, parse_date)
-from getpass_core.fonts import (fonts_are_missing, setup_ui_font, ui_family,
-                                verify_ui_family)
+from getpass_core.fonts import fonts_are_missing, setup_ui_font, verify_ui_family
 from getpass_core.registry import BADGE_REGISTRY, PASS_REGISTRY, save_registry_pdf
 from getpass_core.storage import (BADGE_JOURNAL, PASS_JOURNAL, FileBusy,
-                                  export_journal, update_cars_cache)
+                                  export_journal, known_car_brands,
+                                  update_cars_cache)
 
 from . import batch as B
 from .badge_tab import BadgePanel
+from .components import Field, brand_logo, section_title
 from .journal import open_journal_window
-from .pass_tab import PassForm
-from .widgets import (CLR_BG, CLR_CARD, CLR_NAVY, CLR_RED, CLR_TEAL, F,
-                      Debouncer, ProgressDialog, make_scrollable, styled_button)
+from .pass_tab import TERRITORIES, PassForm
+from .theme import Card, Theme
+from .widgets import Debouncer, ProgressDialog, make_scrollable
 
 
 class App:
@@ -42,12 +43,12 @@ class App:
         self.root.title("СПб ГУП «Горэлектротранс» — Система выпуска пропусков и бейджей")
         # масштаб экрана: на 125/150% интерфейс должен стать крупнее, а не мыльнее
         self.scale = apply_scaling(self.root)
-        win_w, win_h = fit_to_screen(self.root, scaled(1500, self.scale),
-                                     scaled(920, self.scale))
+        default_w, default_h = scaled(1500, self.scale), scaled(920, self.scale)
+        saved_w, saved_h = self._parse_geometry(self.settings.get("window_geometry", ""))
+        win_w, win_h = fit_to_screen(self.root, saved_w or default_w, saved_h or default_h)
         self.root.geometry(f"{win_w}x{win_h}")
         self.root.minsize(min(win_w, scaled(1000, self.scale)),
                           min(win_h, scaled(660, self.scale)))
-        self.root.configure(bg=CLR_BG)
         if os.path.exists(config.ICON_FILE):
             try:
                 self.root.iconbitmap(config.ICON_FILE)
@@ -55,22 +56,26 @@ class App:
                 pass
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        # шрифт проверяем уже после создания root: до него список семейств
-        # Tk недоступен
+        # тема строится сразу после root, но до остального интерфейса —
+        # шрифт брендбука проверяем только теперь: до создания root список
+        # семейств, которые видит Tk, недоступен
+        palette = self.settings.get("theme", "light")
+        self.theme = Theme(self.root, palette, self.scale)
         verify_ui_family(self.root)
+        self.theme.apply_window(self.root)
 
-        self._apply_style()
         self._build_header()
         self._build_system_bar()
 
-        self.main_frame = ttk.Frame(self.root, padding="10")
-        self.main_frame.pack(fill="both", expand=True)
+        self.main_frame = tk.Frame(self.root, bg=self.theme.c("ground"))
+        self.main_frame.pack(fill="both", expand=True, padx=self.theme.sp(3),
+                             pady=(0, self.theme.sp(3)))
         self.notebook = ttk.Notebook(self.main_frame)
         self.notebook.pack(fill="both", expand=True)
 
         self.preview = Debouncer(self.root, self._render_preview, 150)
         self._build_pass_tab()
-        self.badge = BadgePanel(self.notebook, self.settings, self.root, self.scale)
+        self.badge = BadgePanel(self.notebook, self.settings, self.root, self.theme)
         self.badge.bind_app(self)
 
         self._bind_hotkeys()
@@ -78,50 +83,67 @@ class App:
         self.update_tab_states()
         self.root.after(200, self._startup_checks)
         self.root.after(250, self._initial_previews)
-        self.p1.plate.focus()
+        active_tab = self.settings.get("active_tab", 0)
+        if active_tab in (0, 1):
+            try:
+                self.notebook.select(active_tab)
+            except Exception:
+                pass
+        if self.notebook.index(self.notebook.select()) == 0:
+            self.p1.plate.focus()
+
+    @staticmethod
+    def _parse_geometry(spec: str) -> tuple[int, int]:
+        """Разобрать сохранённые размеры окна вида «1500x920». Пустая или
+        битая строка — обе стороны 0, вызывающий код подставит значение
+        по умолчанию."""
+        try:
+            width, _, height = spec.partition("x")
+            return int(width), int(height)
+        except (ValueError, AttributeError):
+            return 0, 0
 
     # =============================================== оформление
 
-    def _apply_style(self):
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure(".", background=CLR_BG, font=F(9))
-        style.configure("TLabel", background=CLR_BG, foreground="#2C3E50")
-        style.configure("TLabelframe", background=CLR_BG, borderwidth=0)
-        style.configure("TLabelframe.Label", background=CLR_BG, foreground=CLR_NAVY)
-        style.configure("TNotebook", background=CLR_BG, borderwidth=0)
-        style.configure("TNotebook.Tab", font=F(10, True), padding=[20, 9],
-                        background="#D0DCE5", foreground="#334E68")
-        style.map("TNotebook.Tab",
-                  background=[("selected", CLR_NAVY), ("active", "#BCCCDC")],
-                  foreground=[("selected", "#FFFFFF"), ("active", "#102A43")])
-        style.configure("Treeview", font=F(10), rowheight=26)
-        style.configure("Treeview.Heading", font=F(9, True))
+    def _zones_source(self):
+        seen = list(TERRITORIES)
+        for z in PASS_JOURNAL.distinct("zone"):
+            if z not in seen:
+                seen.append(z)
+        return seen
 
     def _build_header(self):
-        header = tk.Frame(self.root, bg=CLR_NAVY, height=78)
+        th = self.theme
+        header = tk.Frame(self.root, bg=th.c("primary"), height=th.px(72))
         header.pack(fill="x")
-        strip = tk.Frame(header, height=5)
-        strip.pack(fill="x", side="top")
-        for clr in ("#1E2548", CLR_TEAL, CLR_RED):
-            tk.Frame(strip, bg=clr, height=5).pack(side="left", fill="both", expand=True)
-        tk.Label(header, text="СПБ ГУП «ГОРЭЛЕКТРОТРАНС»", font=F(14, True),
-                 bg=CLR_NAVY, fg="#FFFFFF").pack(anchor="w", padx=20, pady=(9, 0))
-        note = f"  •  брендбук-шрифт: {ui_family()}" if ui_family() != "Segoe UI" else ""
-        tk.Label(header,
-                 text="Комплекс оформления пропусков на транспорт и постоянных "
-                      f"пропусков работников{note}",
-                 font=F(9), bg=CLR_NAVY, fg="#A0C4E2").pack(anchor="w", padx=20, pady=(0, 9))
+        header.pack_propagate(False)
+        logo = brand_logo(th, 168, knockout=True)
+        if logo is not None:
+            lbl = tk.Label(header, image=logo, bg=th.c("primary"))
+            lbl.image = logo
+            lbl.pack(side="left", padx=th.sp(5), pady=th.sp(3))
+        else:
+            tk.Label(header, text="ГЭТ", font=th.font("display"), bg=th.c("primary"),
+                     fg=th.c("on_primary")).pack(side="left", padx=th.sp(5))
+        text_box = tk.Frame(header, bg=th.c("primary"))
+        text_box.pack(side="left", pady=th.sp(3))
+        tk.Label(text_box, text="Система выпуска пропусков", font=th.font("title"),
+                 bg=th.c("primary"), fg=th.c("on_primary")).pack(anchor="w")
+        tk.Label(text_box, text="СПб ГУП «Горэлектротранс»", font=th.font("caption"),
+                 bg=th.c("primary"), fg=th.c("accent")).pack(anchor="w")
 
     def _build_system_bar(self):
-        bar = tk.Frame(self.root, bg=CLR_BG)
-        bar.pack(fill="x", padx=12, pady=6)
-        tk.Label(bar, text="🖨️ Принтер:", bg=CLR_BG, font=F(9, True)).pack(side="left")
+        th = self.theme
+        bar = tk.Frame(self.root, bg=th.c("ground"))
+        bar.pack(fill="x", padx=th.sp(3), pady=th.sp(3))
+        tk.Label(bar, text="Принтер", bg=th.c("ground"), fg=th.c("ink_muted"),
+                 font=th.font("caption")).pack(side="left", padx=(0, th.sp(2)))
         self.printer_var = tk.StringVar(value=self.settings.get("last_printer",
                                                                 printing.DEFAULT_PRINTER))
         self.printer_cb = ttk.Combobox(bar, textvariable=self.printer_var,
-                                       state="readonly", width=38, font=F(9))
-        self.printer_cb.pack(side="left", padx=6)
+                                       state="readonly", width=34,
+                                       style="Field.TCombobox")
+        self.printer_cb.pack(side="left", padx=(0, th.sp(4)))
         self.printer_cb["values"] = [self.printer_var.get()]
         self.printer_cb.bind("<<ComboboxSelected>>", lambda e: self.save_settings())
         # перечисление принтеров занимает секунды — не держим им запуск окна.
@@ -130,14 +152,30 @@ class App:
         threading.Thread(target=self._load_printers, daemon=True).start()
         self.root.after(300, self._poll_printers)
 
-        styled_button(bar, "🧹 ОЧИСТИТЬ ФОРМУ", self.clear_current_form, "#E91E63",
-                      font=F(10, True), padx=14, pady=3).pack(side="right", padx=(6, 0))
-        styled_button(bar, "♻️ Восстановить", self.restore_database, "#FF9800",
-                      padx=10, pady=3).pack(side="right", padx=3)
-        styled_button(bar, "💾 Бэкап", self.backup_database, "#4CAF50",
-                      padx=10, pady=3).pack(side="right", padx=3)
-        styled_button(bar, "🧪 Тест иконок", self.dot_icons_test, "#7E57C2",
-                      padx=10, pady=3).pack(side="right", padx=3)
+        ttk.Button(bar, text="Очистить форму", command=self.clear_current_form,
+                  style="Danger.TButton").pack(side="right", padx=(th.sp(2), 0))
+        ttk.Button(bar, text="Восстановить", command=self.restore_database,
+                  style="Ghost.TButton").pack(side="right", padx=(th.sp(2), 0))
+        ttk.Button(bar, text="Бэкап", command=self.backup_database,
+                  style="Ghost.TButton").pack(side="right", padx=(th.sp(2), 0))
+        ttk.Button(bar, text="Тёмная тема" if not th.is_dark else "Светлая тема",
+                  command=self.toggle_theme, style="Ghost.TButton"
+                  ).pack(side="right", padx=(th.sp(2), 0))
+        ttk.Button(bar, text="Тест иконок", command=self.dot_icons_test,
+                  style="Ghost.TButton").pack(side="right")
+
+    def toggle_theme(self):
+        """Переключить светлую/тёмную тему. Требует перезапуска окна."""
+        current = self.settings.get("theme", "light")
+        self.settings["theme"] = "dark" if current == "light" else "light"
+        config.save_settings({"theme": self.settings["theme"]})
+        if messagebox.askyesno(
+                "Смена темы",
+                "Тема изменена. Чтобы применить её ко всем окнам,\n"
+                "программу нужно перезапустить.\n\nЗакрыть программу сейчас?"):
+            self.preview.cancel()
+            self.badge.preview.cancel()
+            self.root.destroy()
 
     def _load_printers(self):
         """Выполняется в фоновом потоке: только считает список, tk не трогает."""
@@ -168,130 +206,138 @@ class App:
     # =============================================== вкладка ТС
 
     def _build_pass_tab(self):
-        container = ttk.Frame(self.notebook, padding="6")
-        self.notebook.add(container, text="   🚗  Пропуск на ТС (Авто)   ")
+        th = self.theme
+        container = tk.Frame(self.notebook, bg=th.c("ground"))
+        self.notebook.add(container, text="  Пропуск на ТС  ")
 
-        btn_bar = tk.Frame(container, bg=CLR_BG)
-        btn_bar.pack(side="bottom", fill="x", pady=(8, 0))
-        row1 = tk.Frame(btn_bar, bg=CLR_BG)
-        row1.pack(fill="x", pady=(0, 6))
-        styled_button(row1, "💾  Сохранить PDF  (Ctrl+S)", self.generate_pass, CLR_NAVY,
-                      font=F(11, True), pady=10, activebackground="#051627"
-                      ).pack(side="left", fill="x", expand=True, padx=(0, 6))
-        styled_button(row1, "🖨️  Напечатать сразу  (Ctrl+P)", self.direct_print_pass,
-                      "#007799", font=F(11, True), pady=10, padx=18).pack(side="right")
-        row2 = tk.Frame(btn_bar, bg=CLR_BG)
+        btn_bar = tk.Frame(container, bg=th.c("ground"))
+        btn_bar.pack(side="bottom", fill="x", pady=(th.sp(3), 0))
+        row1 = tk.Frame(btn_bar, bg=th.c("ground"))
+        row1.pack(fill="x", pady=(0, th.sp(2)))
+        ttk.Button(row1, text="Сохранить PDF   (Ctrl+S)", command=self.generate_pass,
+                  style="Primary.TButton").pack(side="left", fill="x", expand=True,
+                                                padx=(0, th.sp(2)))
+        ttk.Button(row1, text="Напечатать сразу   (Ctrl+P)", command=self.direct_print_pass,
+                  style="Accent.TButton").pack(side="right")
+        row2 = tk.Frame(btn_bar, bg=th.c("ground"))
         row2.pack(fill="x")
-        styled_button(row2, "📦 Массовая печать", self.open_batch_passes, "#486581",
-                      pady=7, padx=12).pack(side="left", padx=(0, 6))
-        styled_button(row2, "📋 Реестр ТС для печати", self.registry_passes, "#486581",
-                      pady=7, padx=12).pack(side="left", padx=(0, 6))
-        styled_button(row2, "📊 Журнал ТС", self.open_pass_journal, "#334E68",
-                      pady=7, padx=14).pack(side="right")
-        row3 = tk.Frame(btn_bar, bg=CLR_BG)
-        row3.pack(fill="x", pady=(6, 0))
-        styled_button(row3, "📤 Выгрузить таблицу", self.export_pass_journal, "#00838F",
-                      pady=7, padx=12).pack(side="left")
+        ttk.Button(row2, text="Массовая печать", command=self.open_batch_passes,
+                  style="Ghost.TButton").pack(side="left", padx=(0, th.sp(2)))
+        ttk.Button(row2, text="Реестр ТС для печати", command=self.registry_passes,
+                  style="Ghost.TButton").pack(side="left", padx=(0, th.sp(2)))
+        ttk.Button(row2, text="Выгрузить таблицу", command=self.export_pass_journal,
+                  style="Ghost.TButton").pack(side="left")
+        ttk.Button(row2, text="Журнал ТС", command=self.open_pass_journal,
+                  style="Ghost.TButton").pack(side="right")
 
-        paned = tk.PanedWindow(container, orient="horizontal", bg="#CBD2D9",
-                               sashwidth=5, sashrelief="raised", borderwidth=0)
+        self.pass_paned = tk.PanedWindow(container, orient="horizontal", bg=th.c("ground"),
+                                         sashwidth=th.px(6), sashrelief="flat", borderwidth=0)
+        paned = self.pass_paned
         paned.pack(side="top", fill="both", expand=True)
-        left = tk.Frame(paned, bg=CLR_CARD)
-        paned.add(left, minsize=scaled(420, self.scale), width=scaled(700, self.scale))
-        _, _, inner = make_scrollable(left, CLR_CARD)
+        left = tk.Frame(paned, bg=th.c("ground"))
+        left_width = int(self.settings.get("pass_paned_width") or 0) or scaled(700, self.scale)
+        paned.add(left, minsize=scaled(440, self.scale), width=left_width)
+        _, _, inner = make_scrollable(left, th.c("ground"))
 
-        self.pass_notebook = ttk.Notebook(inner)
-        self.pass_notebook.pack(fill="x", pady=(0, 6), padx=2)
+        car_card = Card(inner, th)
+        car_card.pack(fill="x", pady=(0, th.sp(3)))
+        cb = car_card.body
+        section_title(cb, th, "Транспортное средство").pack(anchor="w",
+                                                             pady=(0, th.sp(3)))
+        self.pass_notebook = ttk.Notebook(cb, style="Inner.TNotebook")
+        self.pass_notebook.pack(fill="x")
         territory = self.settings.get("territory", "")
-        self.p1 = PassForm(self.pass_notebook, self.settings["last_pass_num"],
-                           self.preview.schedule, default_territory=territory)
-        self.pass_notebook.add(self.p1.frame, text="  🚗 Пропуск №1 (Верхний)  ")
-        self.p2 = PassForm(self.pass_notebook,
+        self.p1 = PassForm(self.pass_notebook, th, self.settings["last_pass_num"],
+                           self.preview.schedule, default_territory=territory,
+                           zones_source=self._zones_source,
+                           makes_source=known_car_brands)
+        self.pass_notebook.add(self.p1.frame, text="Пропуск №1 (верхний)")
+        self.p2 = PassForm(self.pass_notebook, th,
                            next_number(self.settings["last_pass_num"]).value,
                            self.preview.schedule, is_second=True,
-                           default_territory="", peer_getter=self.p1.get_number)
-        self.pass_notebook.add(self.p2.frame, text="  🚙 Пропуск №2 (Нижний)  ")
+                           default_territory="", peer_getter=self.p1.get_number,
+                           zones_source=self._zones_source,
+                           makes_source=known_car_brands)
+        self.pass_notebook.add(self.p2.frame, text="Пропуск №2 (нижний)")
+        car_card.fit()
 
         self._build_common_box(inner)
         self._build_format_box(inner)
         self._build_preview_panel(paned)
 
     def _build_common_box(self, parent):
-        box = tk.LabelFrame(parent, text=" Реквизиты и ответственные лица ",
-                            font=F(9, True), bg=CLR_CARD, fg=CLR_NAVY, padx=10, pady=6)
-        box.pack(fill="x", pady=(0, 6), padx=2)
-        row = tk.Frame(box, bg=CLR_CARD)
-        row.pack(fill="x", pady=2)
-        tk.Label(row, text="Дата выдачи:", bg=CLR_CARD, fg="#486581",
-                 font=F(9)).pack(side="left")
-        self.entry_issue = ttk.Entry(row, width=13, font=F(9))
-        self.entry_issue.insert(0, self.settings["issue_date"])
-        self.entry_issue.pack(side="left", padx=(6, 16))
-        tk.Label(row, text="Действителен до:", bg=CLR_CARD, fg="#486581",
-                 font=F(9)).pack(side="left")
-        self.entry_valid = ttk.Entry(row, width=13, font=F(9))
-        self.entry_valid.insert(0, self.settings["valid_until"])
-        self.entry_valid.pack(side="left", padx=(6, 0))
+        th = self.theme
+        card = Card(parent, th)
+        card.pack(fill="x", pady=(0, th.sp(3)))
+        b = card.body
+        section_title(b, th, "Реквизиты и ответственные лица").pack(
+            anchor="w", pady=(0, th.sp(3)))
+        row = tk.Frame(b, bg=th.c("surface"))
+        row.pack(fill="x")
+        self.entry_issue = Field(row, th, "Дата выдачи", width=12, required=True)
+        self.entry_issue.pack(side="left", padx=(0, th.sp(3)))
+        self.entry_issue.set(self.settings["issue_date"])
+        self.entry_valid = Field(row, th, "Действителен до", width=12, required=True)
+        self.entry_valid.pack(side="left")
+        self.entry_valid.set(self.settings["valid_until"])
+
         # галка живёт на отдельной строке: в одной строке с двумя датами
         # её подпись не помещалась и обрезалась вместе с самим переключателем
         self.is_temp_var = tk.BooleanVar(value=self.settings.get("is_temporary_car", False))
-        row_temp = tk.Frame(box, bg=CLR_CARD)
-        row_temp.pack(fill="x", pady=(2, 0))
-        tk.Checkbutton(row_temp, text="⚠️ Временный пропуск на ТС (не более 3 месяцев)",
-                       variable=self.is_temp_var, command=self.on_toggle_temp,
-                       bg=CLR_CARD, activebackground=CLR_CARD, font=F(9, True),
-                       fg="#C62828", anchor="w").pack(side="left", anchor="w")
+        th.check(b, "⚠ Временный пропуск на ТС (не более 3 месяцев)",
+                self.is_temp_var, command=self.on_toggle_temp,
+                style="Warning.TCheckbutton").pack(anchor="w", pady=(th.sp(3), 0))
 
-        row2 = tk.Frame(box, bg=CLR_CARD)
-        row2.pack(fill="x", pady=(4, 2))
-        tk.Label(row2, text="Должность ОТБ:", bg=CLR_CARD, fg="#486581",
-                 font=F(9)).pack(side="left")
-        self.entry_otb_post = ttk.Entry(row2, font=F(9))
-        self.entry_otb_post.insert(0, self.settings.get("otb_post", ""))
-        self.entry_otb_post.pack(side="left", fill="x", expand=True, padx=(6, 10))
-        tk.Label(row2, text="ФИО ОТБ:", bg=CLR_CARD, fg="#486581",
-                 font=F(9)).pack(side="left")
-        self.entry_otb_name = ttk.Entry(row2, width=18, font=F(9))
-        self.entry_otb_name.insert(0, self.settings.get("otb_name", ""))
-        self.entry_otb_name.pack(side="left", padx=(6, 0))
+        row2 = tk.Frame(b, bg=th.c("surface"))
+        row2.pack(fill="x", pady=(th.sp(3), 0))
+        self.entry_otb_post = Field(row2, th, "Должность ОТБ")
+        self.entry_otb_post.pack(side="left", fill="x", expand=True, padx=(0, th.sp(3)))
+        self.entry_otb_post.set(self.settings.get("otb_post", ""))
+        self.entry_otb_name = Field(row2, th, "ФИО ОТБ", width=18)
+        self.entry_otb_name.pack(side="left")
+        self.entry_otb_name.set(self.settings.get("otb_name", ""))
         for widget in (self.entry_issue, self.entry_valid,
                        self.entry_otb_post, self.entry_otb_name):
             widget.bind("<KeyRelease>", self.preview.schedule, add="+")
+        card.fit()
 
     def _build_format_box(self, parent):
-        box = tk.LabelFrame(parent, text=" Формат формирования ", font=F(9, True),
-                            bg=CLR_CARD, fg=CLR_NAVY, padx=10, pady=4)
-        box.pack(fill="x", pady=(0, 6), padx=2)
+        th = self.theme
+        card = Card(parent, th)
+        card.pack(fill="x")
+        b = card.body
+        section_title(b, th, "Формат формирования").pack(anchor="w", pady=(0, th.sp(2)))
         self.print_mode = tk.StringVar(value=self.settings["print_mode"])
-        for text, value in (("📄 Лист А4: Два пропуска (№1 сверху, №2 снизу)", "a4"),
-                            ("📄 Лист А5: Один пропуск (вкладка №2 блокируется)", "a5")):
-            tk.Radiobutton(box, text=text, variable=self.print_mode, value=value,
-                           command=self.update_tab_states, bg=CLR_CARD,
-                           activebackground=CLR_CARD, font=F(9)).pack(anchor="w")
+        th.radio(b, "Лист А4 — два пропуска (№1 сверху, №2 снизу)", self.print_mode,
+                "a4", command=self.update_tab_states).pack(anchor="w")
+        th.radio(b, "Лист А5 — один пропуск (вкладка №2 блокируется)", self.print_mode,
+                "a5", command=self.update_tab_states).pack(anchor="w")
+        card.fit()
 
     def _build_preview_panel(self, paned):
-        self.preview_panel = tk.LabelFrame(paned, text=" ПРЕДПРОСМОТР ПРОПУСКА НА ТС ",
-                                           font=F(11, True), bg="#FFFFFF", fg=CLR_NAVY,
-                                           padx=12, pady=10)
-        paned.add(self.preview_panel, minsize=scaled(330, self.scale), width=scaled(520, self.scale))
-        switch = tk.Frame(self.preview_panel, bg="#FFFFFF")
-        switch.pack(fill="x", pady=(0, 6))
-        tk.Label(switch, text="Показывать:", bg="#FFFFFF", fg="#334E68",
-                 font=F(9, True)).pack(side="left")
+        th = self.theme
+        wrapper = tk.Frame(paned, bg=th.c("ground"))
+        paned.add(wrapper, minsize=scaled(340, self.scale), width=scaled(520, self.scale))
+        self.preview_panel = Card(wrapper, th)
+        self.preview_panel.pack(fill="both", expand=True)
+        b = self.preview_panel.body
+        head = tk.Frame(b, bg=th.c("surface"))
+        head.pack(fill="x", pady=(0, th.sp(3)))
+        section_title(head, th, "Предпросмотр бланка").pack(side="left")
         self.preview_target = tk.StringVar(value=self.settings.get("auto_preview_target", "1"))
-        for text, value in ((" Пропуск №1", "1"), (" Пропуск №2", "2")):
-            tk.Radiobutton(switch, text=text, variable=self.preview_target, value=value,
-                           bg="#FFFFFF", activebackground="#FFFFFF", font=F(9),
-                           command=self.preview.schedule).pack(side="left", padx=4)
-        self.preview_label = tk.Label(self.preview_panel, bg="#FFFFFF", relief="solid",
-                                      borderwidth=1, fg="#829AB1", font=F(10),
+        switch = tk.Frame(head, bg=th.c("surface"))
+        switch.pack(side="right")
+        th.radio(switch, "№1", self.preview_target, "1",
+                command=self.preview.schedule).pack(side="left")
+        th.radio(switch, "№2", self.preview_target, "2",
+                command=self.preview.schedule).pack(side="left", padx=(th.sp(2), 0))
+        self.preview_label = tk.Label(b, bg=th.c("surface"), fg=th.c("ink_faint"),
+                                      font=th.font("body"),
                                       text="Заполните поля —\nпредпросмотр появится здесь")
-        self.preview_label.pack(fill="both", expand=True, pady=(0, 8))
-        tk.Label(self.preview_panel,
-                 text="Макет обновляется автоматически при вводе данных.\n"
-                      "Растяните разделитель или окно, чтобы увеличить превью.",
-                 bg="#FFFFFF", fg="#718096", font=F(8, italic=True),
-                 justify="center").pack()
+        self.preview_label.pack(fill="both", expand=True)
+        tk.Label(b, text="Макет обновляется автоматически при вводе данных.",
+                bg=th.c("surface"), fg=th.c("ink_faint"), font=th.font("caption")
+                ).pack(pady=(th.sp(2), 0))
         self.preview_panel.bind("<Configure>",
                                 lambda e: self.preview.schedule(delay=140))
 
@@ -363,6 +409,10 @@ class App:
     # =============================================== настройки
 
     def collect_settings(self):
+        try:
+            pass_paned_width = self.pass_paned.sash_coord(0)[0]
+        except Exception:
+            pass_paned_width = self.settings.get("pass_paned_width", 0)
         return {
             "last_pass_num": self.p1.get_number() or self.settings.get("last_pass_num"),
             "territory": self.p1.territory.get().strip() or self.settings.get("territory"),
@@ -373,6 +423,9 @@ class App:
             "print_mode": self.print_mode.get(),
             "last_printer": self.printer_var.get(),
             "auto_preview_target": self.preview_target.get(),
+            "window_geometry": f"{self.root.winfo_width()}x{self.root.winfo_height()}",
+            "active_tab": self.notebook.index(self.notebook.select()),
+            "pass_paned_width": pass_paned_width,
             **self.badge.collect_settings(),
         }
 
@@ -458,16 +511,20 @@ class App:
         if issue is None:
             # раньше сюда молча подставлялась сегодняшняя дата, несмотря на
             # показанное предупреждение — документ печатался не с той датой
+            self.entry_issue.widget.state(["invalid"])
             messagebox.showwarning("Некорректная дата выдачи",
                                    f"Поле «Дата выдачи»: «{raw_issue}»\nФормат: ДД.ММ.ГГГГ")
             self.entry_issue.focus()
             return None, None
+        self.entry_issue.widget.state(["!invalid"])
         valid = parse_date(self.entry_valid.get())
         if valid is None:
+            self.entry_valid.widget.state(["invalid"])
             messagebox.showwarning("Укажите срок",
                                    "Заполните поле «Действителен до» (ДД.ММ.ГГГГ).")
             self.entry_valid.focus()
             return None, None
+        self.entry_valid.widget.state(["!invalid"])
         if valid < issue:
             messagebox.showwarning("Ошибка дат",
                                    "Дата окончания не может быть раньше даты выдачи!")
@@ -509,7 +566,7 @@ class App:
         issue, valid = self._validate_pass_dates()
         if issue is None:
             return None
-        if self.p1.is_empty():
+        if not self.p1.validate_required() or self.p1.is_empty():
             messagebox.showwarning("Внимание",
                                    "Заполните «Гос. номер автомобиля» во вкладке «Пропуск №1»!")
             self.notebook.select(0)
@@ -703,7 +760,7 @@ class App:
         if not path:
             return
         try:
-            with ProgressDialog(self.root, "Формирование реестра",
+            with ProgressDialog(self.root, self.theme, "Формирование реестра",
                                 max(1, len(records) // 23 + 1)) as dlg:
                 pages = save_registry_pdf(
                     records, spec, len(all_records), path,
@@ -721,17 +778,18 @@ class App:
 
     def open_pass_journal(self):
         open_journal_window(self.root, PASS_JOURNAL,
-                            "Журнал выданных пропусков ТС — ГЭТ СПб")
+                            "Журнал выданных пропусков ТС — ГЭТ СПб", self.theme)
 
     def open_badge_journal(self):
         open_journal_window(self.root, BADGE_JOURNAL,
-                            "Журнал постоянных пропусков работников — ГЭТ СПб")
+                            "Журнал постоянных пропусков работников — ГЭТ СПб",
+                            self.theme)
 
     # =============================================== массовая печать
 
     def open_batch_passes(self):
         B.open_batch_dialog(
-            self.root, "МАССОВАЯ ПЕЧАТЬ пропусков на ТС",
+            self.root, self.theme, "Массовая печать пропусков на ТС",
             "1. Скачайте шаблон таблицы и заполните список машин.\n"
             "2. Выберите готовый файл для генерации единого PDF.",
             lambda: B.export_template(B.PASS_TEMPLATE_HEADER, B.PASS_TEMPLATE_SAMPLE,
@@ -757,7 +815,7 @@ class App:
                         driver=it.get("driver_full", ""))
                    for it in items]
         pages_total = (len(items) + 1) // 2
-        if B.run_batch(self.root, "Массовая печать ТС", items,
+        if B.run_batch(self.root, self.theme, "Массовая печать ТС", items,
                        lambda: B.pass_pages(items, common), pages_total,
                        PASS_JOURNAL, records,
                        f"Массовая_печать_ТС_{len(items)}шт.pdf"):
@@ -765,7 +823,7 @@ class App:
 
     def open_batch_badges(self):
         B.open_batch_dialog(
-            self.root, "МАССОВАЯ ПЕЧАТЬ бейджей работников",
+            self.root, self.theme, "Массовая печать бейджей работников",
             "1. Скачайте шаблон и заполните сотрудников.\n"
             "2. Укажите имена файлов фото (лежат рядом с CSV).\n"
             "3. Выберите файл — бейджи разместятся на А4 (сетка 3×3).",
@@ -792,7 +850,7 @@ class App:
             return
         records = list(items)
         pages_total = (len(items) + 8) // 9
-        B.run_batch(self.root, "Массовая печать бейджей", items,
+        B.run_batch(self.root, self.theme, "Массовая печать бейджей", items,
                     lambda: B.badge_pages(items), pages_total,
                     BADGE_JOURNAL, records,
                     f"Массовая_печать_бейджей_{len(items)}шт.pdf")

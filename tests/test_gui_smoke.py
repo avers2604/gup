@@ -131,6 +131,32 @@ def test_badge_requires_photo(app):
     assert app.badge.validated_data() is None
 
 
+def test_badge_role_autocompletes_from_journal(app):
+    """Должность в бейдже — свободный текст, но должна предлагать варианты
+    из уже выданных бейджей, а не заставлять вводить одно и то же заново."""
+    from getpass_core.storage import BADGE_JOURNAL
+    BADGE_JOURNAL.append_many([{"tab_num": "00099", "fio": "Тестов Т.Т.", "role": "Слесарь"}])
+    app.notebook.select(1)
+    app.root.update()
+    app.badge.role.widget.delete(0, tkinter.END)
+    app.badge.role.widget.insert(0, "слес")
+    app.badge.role._on_key(types.SimpleNamespace(keysym="e"))
+    app.root.update()
+    assert "Слесарь" in app.badge.role._listbox.get(0, tkinter.END)
+
+
+def test_empty_plate_is_flagged_invalid_before_print(app, monkeypatch):
+    """Регрессия: validate_required() существовал, но никогда не вызывался
+    перед печатью — поле не подсвечивалось, хотя предупреждение появлялось."""
+    from tkinter import messagebox
+    monkeypatch.setattr(messagebox, "showwarning", lambda *a, **k: None)
+    app.notebook.select(0)
+    app.p1.plate_var.set("")
+    app.root.update()
+    assert app.build_documents() is None
+    assert "invalid" in app.p1.plate.widget.state()
+
+
 def test_journal_windows_open(app):
     app.open_pass_journal()
     app.open_badge_journal()
@@ -145,6 +171,41 @@ def test_settings_saved_on_close(app, monkeypatch):
     app.on_closing()
     from getpass_core import config
     assert config.load_settings()["otb_name"] == "Петров И.С."
+
+
+def test_paned_width_is_captured_on_close(app, monkeypatch):
+    """Регрессия: ширина левой панели никогда не сохранялась — окно всегда
+    открывалось с шириной панелей по умолчанию, даже если пользователь
+    подвинул разделитель."""
+    from tkinter import messagebox
+    monkeypatch.setattr(messagebox, "askokcancel", lambda *a, **k: True)
+    app.root.update()
+    app.on_closing()
+    from getpass_core import config
+    assert config.load_settings()["pass_paned_width"] > 0
+
+
+def test_window_geometry_and_active_tab_persist_across_restart(app, monkeypatch):
+    """Регрессия: размер окна и выбранная вкладка не запоминались — каждый
+    перезапуск начинался с окна и вкладки по умолчанию."""
+    from tkinter import messagebox
+
+    from getpass_ui.app import App
+    monkeypatch.setattr(messagebox, "askokcancel", lambda *a, **k: True)
+    app.root.geometry("1200x800")
+    app.root.update()
+    app.notebook.select(1)
+    app.root.update()
+    app.on_closing()
+
+    second = App()
+    try:
+        second.root.update()
+        assert second.notebook.index(second.notebook.select()) == 1
+        width, height = (int(v) for v in second.root.geometry().split("+")[0].split("x"))
+        assert (width, height) == (1200, 800)
+    finally:
+        second.root.destroy()
 
 
 def _really_visible(widget, min_w=40, min_h=12):
@@ -193,7 +254,7 @@ def test_badge_tab_input_fields_are_visible(app):
     b = app.badge
     fields = {
         "Подразделение": b.park, "Табельный номер": b.tab_num, "Должность": b.role,
-        "Фамилия": b.sur_ent, "Имя": b.nam_ent, "Отчество": b.pat_ent,
+        "Фамилия": b.sur_field, "Имя": b.nam_field, "Отчество": b.pat_field,
         "Телефон": b.phone, "Выдан": b.issue, "До": b.valid,
     }
     hidden = {name: _really_visible(w)[1] for name, w in fields.items()
@@ -223,7 +284,7 @@ def test_export_button_is_present(app):
         found = [] if found is None else found
         for child in widget.winfo_children():
             try:
-                if child.winfo_class() == "Button":
+                if child.winfo_class() in ("Button", "TButton"):
                     found.append(child.cget("text"))
             except Exception:
                 pass
@@ -244,7 +305,8 @@ def test_crop_window_fits_small_screen(app, monkeypatch):
     from getpass_ui.crop_window import CropWindow
     monkeypatch.setattr(app.root, "winfo_screenwidth", lambda: 1366)
     monkeypatch.setattr(app.root, "winfo_screenheight", lambda: 768)
-    window = CropWindow(app.root, Image.new("RGB", (1200, 1600), "#888"), lambda *a: None)
+    window = CropWindow(app.root, Image.new("RGB", (1200, 1600), "#888"), lambda *a: None,
+                        app.theme)
     pump(app.root, 0.5)
     geometry = window.win.geometry().split("+")[0]
     width, height = (int(v) for v in geometry.split("x"))

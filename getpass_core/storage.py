@@ -64,8 +64,8 @@ class JournalSchema:
 
 
 _AUDIT_FIELDS = (
-    Field("status", "Статус", 16, 100, "center"),
-    Field("revoked_at", "Аннулирован", 16, 95, "center"),
+    Field("status", "Статус", 16, 115, "center"),
+    Field("revoked_at", "Аннулирован", 16, 120, "center"),
     Field("revoke_reason", "Причина", 30, 160, "w"),
 )
 
@@ -81,8 +81,8 @@ PASS_SCHEMA = JournalSchema(
         Field("zone", "Зона допуска", 26, 150, "w"),
         Field("driver", "Водитель", 40, 240, "w"),
         Field("phone", "Телефон", 20, 130, "center"),
-        Field("issue_date", "Дата выдачи", 16, 85, "center"),
-        Field("valid_until", "Действителен до", 16, 85, "center"),
+        Field("issue_date", "Дата выдачи", 16, 105, "center"),
+        Field("valid_until", "Действителен до", 16, 135, "center"),
     ) + _AUDIT_FIELDS,
     legacy_layouts={
         6: ["num", "plate", "zone", "driver", "issue_date", "valid_until"],
@@ -102,8 +102,10 @@ BADGE_SCHEMA = JournalSchema(
         Field("role", "Должность", 28, 180, "w"),
         Field("park", "Подразделение", 32, 200, "w"),
         Field("phone", "Телефон", 18, 120, "center"),
-        Field("issue_date", "Дата выдачи", 16, 85, "center"),
-        Field("valid_until", "Действителен до", 16, 85, "center"),
+        Field("issue_date", "Дата выдачи", 16, 105, "center"),
+        Field("valid_until", "Действителен до", 16, 135, "center"),
+        # не показывается в журнале колонкой — только для перевыпуска бейджа
+        Field("photo_path", "Фото", 40, 0, "w"),
     ) + _AUDIT_FIELDS,
     legacy_layouts={
         7: ["tab_num", "fio", "role", "park", "phone", "issue_date", "valid_until"],
@@ -351,6 +353,13 @@ class Journal:
             return plate_key(value)
         return "".join((value or "").upper().split())
 
+    def distinct(self, key: str, records=None) -> list[str]:
+        """Уникальные непустые значения поля — для фильтров и автодополнения."""
+        records = self.read() if records is None else records
+        values = {(rec.get(key) or "").strip() for rec in records}
+        values.discard("")
+        return sorted(values, key=str.lower)
+
 
 PASS_JOURNAL = Journal(PASS_SCHEMA)
 BADGE_JOURNAL = Journal(BADGE_SCHEMA)
@@ -391,12 +400,17 @@ def update_cars_cache(car_infos) -> None:
         key = plate_key(car.get("plate"))
         if not key:
             continue
-        cache[key] = {
+        existing = cache.get(key, {})
+        incoming = {
             "brand": car.get("brand", ""), "model": car.get("model", ""),
             "type": car.get("type", ""), "color": car.get("color", ""),
             "d_pos": car.get("d_pos", ""), "d_fio": car.get("d_fio", ""),
             "d_phone": car.get("phone", ""), "territory": car.get("territory", ""),
         }
+        # не затираем ранее известные поля пустыми значениями — например,
+        # повторная выдача пропуска без указания цвета не должна стирать
+        # цвет, сохранённый при первой выдаче
+        cache[key] = {k: (v or existing.get(k, "")) for k, v in incoming.items()}
         changed = True
     if changed:
         save_cars_cache(cache)
@@ -404,6 +418,13 @@ def update_cars_cache(car_infos) -> None:
 
 def lookup_car(plate: str) -> dict | None:
     return load_cars_cache().get(plate_key(plate))
+
+
+def known_car_brands() -> list[str]:
+    """Марки машин, встречавшиеся в базе — для автодополнения."""
+    values = {(car.get("brand") or "").strip() for car in load_cars_cache().values()}
+    values.discard("")
+    return sorted(values, key=str.lower)
 
 
 def export_journal(journal, filepath: str) -> int:
