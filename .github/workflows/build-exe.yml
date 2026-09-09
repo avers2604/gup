@@ -1,0 +1,59 @@
+name: Сборка .exe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Установить Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Установить зависимости
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Собрать .exe
+        run: pyinstaller --onefile --windowed --icon app_icon.ico pass_generator.py
+
+      - name: Собрать папку для переноса
+        shell: pwsh
+        run: |
+          $out = "dist\GET-Passes"
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          Copy-Item dist\pass_generator.exe $out\
+          Copy-Item app_icon.ico $out\
+          if (Test-Path assets) { Copy-Item assets $out\assets -Recurse }
+          if (Test-Path fonts) { Copy-Item fonts $out\fonts -Recurse }
+          if (Test-Path fronts) { Copy-Item fronts $out\fronts -Recurse }
+          Compress-Archive -Path "$out\*" -DestinationPath GET-Passes-windows.zip
+
+      - name: Приложить архив к запуску (Actions Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: GET-Passes-windows
+          path: GET-Passes-windows.zip
+          retention-days: 90
+
+      - name: Обновить релиз «Последняя сборка»
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-build
+          name: Последняя сборка (${{ github.sha }})
+          body: >
+            Автоматическая сборка .exe из ветки main.
+            Скачайте GET-Passes-windows.zip, распакуйте и запустите pass_generator.exe —
+            Python на целевом компьютере не нужен.
+          files: GET-Passes-windows.zip
