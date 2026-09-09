@@ -27,6 +27,7 @@ from .components import Field, brand_logo, section_title
 from .journal import open_journal_window
 from .pass_tab import TERRITORIES, PassForm
 from .theme import Card, Theme
+from .tokens import RADIUS
 from .widgets import Debouncer, ProgressDialog, make_scrollable
 
 
@@ -117,11 +118,18 @@ class App:
         header = tk.Frame(self.root, bg=th.c("primary"), height=th.px(72))
         header.pack(fill="x")
         header.pack_propagate(False)
-        logo = brand_logo(th, 168, knockout=True)
+        # цветной знак (не белая выворотка) не читается на тёмно-синей шапке
+        # напрямую — брендбук допускает выворотку для этого случая, но
+        # белая пилюля-подложка позволяет показать сам цветной знак
+        logo = brand_logo(th, 148, knockout=False)
         if logo is not None:
-            lbl = tk.Label(header, image=logo, bg=th.c("primary"))
+            plate = Card(header, th, radius=RADIUS["chip"], pad=2, fill="#FFFFFF")
+            plate.configure(width=logo.width() + 2 * plate._pad,
+                            height=logo.height() + 2 * plate._pad)
+            plate.pack(side="left", padx=th.sp(5), pady=th.sp(3))
+            lbl = tk.Label(plate.body, image=logo, bg="#FFFFFF")
             lbl.image = logo
-            lbl.pack(side="left", padx=th.sp(5), pady=th.sp(3))
+            lbl.place(relx=0.5, rely=0.5, anchor="center")
         else:
             tk.Label(header, text="ГЭТ", font=th.font("display"), bg=th.c("primary"),
                      fg=th.c("on_primary")).pack(side="left", padx=th.sp(5))
@@ -160,9 +168,7 @@ class App:
                   style="Ghost.TButton").pack(side="right", padx=(th.sp(2), 0))
         ttk.Button(bar, text="Тёмная тема" if not th.is_dark else "Светлая тема",
                   command=self.toggle_theme, style="Ghost.TButton"
-                  ).pack(side="right", padx=(th.sp(2), 0))
-        ttk.Button(bar, text="Тест иконок", command=self.dot_icons_test,
-                  style="Ghost.TButton").pack(side="right")
+                  ).pack(side="right")
 
     def toggle_theme(self):
         """Переключить светлую/тёмную тему. Требует перезапуска окна."""
@@ -218,7 +224,7 @@ class App:
                   style="Primary.TButton").pack(side="left", fill="x", expand=True,
                                                 padx=(0, th.sp(2)))
         ttk.Button(row1, text="Напечатать сразу   (Ctrl+P)", command=self.direct_print_pass,
-                  style="Accent.TButton").pack(side="right")
+                  style="Accent.TButton").pack(side="right", fill="x", expand=True)
         row2 = tk.Frame(btn_bar, bg=th.c("ground"))
         row2.pack(fill="x")
         ttk.Button(row2, text="Массовая печать", command=self.open_batch_passes,
@@ -284,7 +290,7 @@ class App:
         # галка живёт на отдельной строке: в одной строке с двумя датами
         # её подпись не помещалась и обрезалась вместе с самим переключателем
         self.is_temp_var = tk.BooleanVar(value=self.settings.get("is_temporary_car", False))
-        th.check(b, "⚠ Временный пропуск на ТС (не более 3 месяцев)",
+        th.check(b, "Временный пропуск на ТС (не более 3 месяцев)",
                 self.is_temp_var, command=self.on_toggle_temp,
                 style="Warning.TCheckbutton").pack(anchor="w", pady=(th.sp(3), 0))
 
@@ -351,7 +357,7 @@ class App:
         try:
             if not R.template_exists():
                 self.preview_label.config(image="",
-                                          text="⚠ Нет файла template.png\nв папке программы")
+                                          text="Нет файла template.png\nв папке программы")
                 return
             form = self.p2 if self.preview_target.get() == "2" else self.p1
             img = R.render_pass(form.data(placeholder=True), self.common_data(preview=True))
@@ -856,21 +862,6 @@ class App:
                     f"Массовая_печать_бейджей_{len(items)}шт.pdf")
 
     # =============================================== сервис
-
-    def dot_icons_test(self):
-        img, has_raqm = R.render_dot_icons_test_sheet()
-        path = filedialog.asksaveasfilename(
-            defaultextension=".png", filetypes=[("PNG", "*.png")],
-            initialfile="test_DoT_Icons.png")
-        if not path:
-            return
-        img.save(path)
-        note = "" if has_raqm else "\n\nPillow собран без RAQM — лигатуры могут не собраться."
-        messagebox.showinfo("Готово", f"Тестовый лист сохранён:\n{path}{note}")
-        try:
-            os.startfile(path)  # noqa: Windows only
-        except Exception:
-            pass
 
     def backup_database(self):
         path = filedialog.asksaveasfilename(

@@ -12,8 +12,7 @@ from PIL import Image, ImageDraw
 from .blank import TITLE_BASELINE, TITLE_X, build_pass_blank, load_logo
 from .blank import reset_cache as blank_reset_cache
 from .domain import format_plate_visual
-from .fonts import (get_dot_icons_font, get_echoes_font, get_styled_font,
-                    raqm_ok)
+from .fonts import get_dot_icons_font, get_echoes_font, get_styled_font
 
 CARD_W, CARD_H = 638, 1004
 A4_W, A4_H = 2480, 3508
@@ -227,30 +226,6 @@ def render_pass(pass_data, common_data, silent=True):
     draw.text((1940, 260), "ДО:", fill=C_RED, font=f_d_lbl, anchor="lm")
     draw.text((2050, 260), common_data.get('valid_until', ''), fill=C_RED, font=f_d_exp, anchor="lm")
     return img
-
-
-def render_dot_icons_test_sheet():
-    """Тестовый лист кодов пиктограмм. Возвращает (изображение, есть_raqm)."""
-    codes = ["tram", "trol", "p", "no", "b", "left", "right", "up", "down", "back",
-             "pl", "pr", "1", "7", "11a", "o8", "o8a", "o1", "o11a", "O2", "d1", "Dd1",
-             "o2", "o20", "x1", "x20", "tram21", "trol7"]
-    img = Image.new("RGB", (PASS_W, PASS_H), "#FFFFFF")
-    draw = ImageDraw.Draw(img)
-    draw.text((1240, 90), "DoT Icons — тестовый лист кодов (ГЭТ)", fill="#0A2540",
-              font=get_echoes_font(56, bold=True), anchor="mm")
-    if not raqm_ok():
-        draw.text((1240, 170), "ВНИМАНИЕ: Pillow собран без RAQM — составные лигатуры могут не собраться",
-                  fill="#C62828", font=get_echoes_font(34, bold=True), anchor="mm")
-    x, y = 160, 300
-    for code in codes:
-        drawn = draw_dot_icon(draw, code, x + 70, y + 60, "#D32F2F", size=90)
-        draw.text((x + 160, y + 60), code if drawn else f"{code}  (нет шрифта)",
-                  fill="#1B2126", font=get_echoes_font(34), anchor="lm")
-        x += 760
-        if x > 2200:
-            x = 160
-            y += 210
-    return img, raqm_ok()
 
 
 def build_pass_a4_sheet(img1, img2=None):

@@ -70,7 +70,7 @@ class BadgePanel:
                   style="Primary.TButton").pack(side="left", fill="x", expand=True,
                                                 padx=(0, th.sp(2)))
         ttk.Button(row1, text="Напечатать сразу   (Ctrl+P)", command=self.direct_print,
-                  style="Accent.TButton").pack(side="right")
+                  style="Accent.TButton").pack(side="right", fill="x", expand=True)
         row2 = tk.Frame(bar, bg=th.c("ground"))
         row2.pack(fill="x")
         self._btn_batch = ttk.Button(row2, text="Массовая печать", style="Ghost.TButton")
@@ -218,7 +218,7 @@ class BadgePanel:
                        ("Все файлы", "*.*")])
         if not path:
             return
-        self.photo_status.config(text="⏳ Открыт редактор кадрирования...",
+        self.photo_status.config(text="Открыт редактор кадрирования...",
                                  fg=self.theme.c("accent_fill"))
         open_crop_window(self.root, path, self._apply_crop, self.theme)
 
@@ -226,7 +226,7 @@ class BadgePanel:
         # каждый кадр сохраняется отдельным файлом в архиве фотографий:
         # общий временный файл затирался следующим сотрудником
         self.photo_path = store_photo(cropped, config.PHOTO_DIR, self.tab_num.get().strip())
-        self.photo_status.config(text=f"✓ Фото: {box[2]}×{box[3]} px (3:4)",
+        self.photo_status.config(text=f"Фото: {box[2]}×{box[3]} px (3:4)",
                                  fg=self.theme.c("success"))
         self.preview.schedule()
 

@@ -132,12 +132,21 @@ class Theme:
                                        self.c("line"), 1)),
             radius=radius,
             padding=(self.px(11), self.px(8)))
-        self.style.layout(style_name, [(element, {"sticky": "nsew", "children": [
-            (f"{widget}.padding", {"sticky": "nsew", "children": [
-                (f"{widget}.textarea", {"sticky": "nsew"})]})]})])
+        children = [(f"{widget}.padding", {"sticky": "nsew", "children": [
+            (f"{widget}.textarea", {"sticky": "nsew"})]})]
+        if widget == "Combobox":
+            # свой 9-patch layout заменяет весь Combobox.field целиком и по
+            # умолчанию теряет стрелку раскрытия списка — возвращаем её
+            # явным элементом, иначе поле не отличить от обычного текстового
+            children.insert(0, (f"{widget}.downarrow", {"side": "right", "sticky": "ns"}))
+        self.style.layout(style_name, [(element, {"sticky": "nsew", "children": children})])
         self.style.configure(style_name, foreground=self.c("ink"),
                              fieldbackground=self.c("surface"),
-                             insertcolor=self.c("ink"), font=self.font("body"))
+                             insertcolor=self.c("ink"), font=self.font("body"),
+                             arrowsize=self.px(13), background=self.c("surface"),
+                             arrowcolor=self.c("ink_muted"))
+        if widget == "Combobox":
+            self.style.map(style_name, arrowcolor=[("disabled", self.c("ink_faint"))])
 
     # ───────────────────────────── набор стилей
 
