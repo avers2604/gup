@@ -108,7 +108,7 @@ class CropWindow:
         self.zoom_bar.pack(side="bottom", fill="x", padx=th.sp(4), pady=th.sp(1))
         tk.Label(self.win,
                  text="Колесо мыши — масштаб   •   ЛКМ и тяните — перемещение   •   "
-                      "Лицо должно быть в рамке",
+                      "Лицо — по контуру овала",
                  bg=STUDIO_BG, fg=STUDIO_TEXT, font=th.font("body")).pack(
             side="bottom", fill="x", pady=(th.sp(2), th.sp(1)))
         self.c = tk.Canvas(self.win, width=self.canvas_w, height=self.canvas_h,
@@ -184,9 +184,20 @@ class CropWindow:
                                fill="#FFFFFF", width=1, tags="frame")
             self.c.create_line(fx, fy + i * fh / 3, fx + fw, fy + i * fh / 3,
                                fill="#FFFFFF", width=1, tags="frame")
+        self._draw_face_guide(fx, fy, fw, fh)
         self.c.create_text(self.canvas_w // 2, max(14, fy - 18),
                            text="ОБЛАСТЬ ФОТО НА БЕЙДЖЕ (3:4)", fill=th.c("danger"),
                            font=th.font("body", bold=True), tags="frame")
+
+    def _draw_face_guide(self, fx, fy, fw, fh):
+        """Овал-подсказка для положения лица — не распознавание, а ориентир
+        по правилам компоновки паспортного фото: голова с небольшим полем
+        сверху, плечи ниже овала, глаза примерно на уровне верхней трети."""
+        th = self.theme
+        ow, oh = fw * 0.52, fh * 0.58
+        cx, cy = fx + fw / 2, fy + fh * 0.40
+        self.c.create_oval(cx - ow / 2, cy - oh / 2, cx + ow / 2, cy + oh / 2,
+                           outline=th.c("warning"), width=2, dash=(6, 4), tags="frame")
 
     # ------------------------------------------------------- события
 
