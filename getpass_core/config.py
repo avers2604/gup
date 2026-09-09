@@ -199,6 +199,7 @@ DEFAULT_SETTINGS = {
     "active_tab": 0,
     "pass_paned_width": 0,
     "badge_paned_width": 0,
+    "print_pass_back": False,
 }
 
 

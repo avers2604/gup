@@ -54,6 +54,28 @@ class TestDeterminism:
                 == R.render_single_badge_image(BADGE).tobytes())
 
 
+class TestPassBack:
+    def test_size_matches_front(self):
+        assert R.render_pass_back().size == (R.PASS_W, R.PASS_H)
+
+    def test_render_is_stable(self):
+        """Текст фиксирован и кешируется — повторный вызов не должен
+        перерисовывать по-другому."""
+        assert R.render_pass_back().tobytes() == R.render_pass_back().tobytes()
+
+    def test_something_is_actually_drawn(self):
+        """Не пустой белый лист: должны быть тёмные пиксели текста/рамки."""
+        back = R.render_pass_back()
+        assert back.convert("L").getextrema()[0] < 100
+
+    def test_a4_sheet_of_back_matches_front_dimensions(self):
+        """Лист А4 разрезается на два пропуска — оборот дублируется так же,
+        как лицевая сторона, чтобы совпасть с обеими половинами после
+        разреза."""
+        back = R.render_pass_back()
+        assert R.build_pass_a4_sheet(back, back).size == (R.A4_W, R.A4_H)
+
+
 class TestBlankIsDrawnInCode:
     def test_no_external_template_needed(self, tmp_path, monkeypatch):
         """Бланк строится кодом: отсутствие template.png ничего не ломает."""
