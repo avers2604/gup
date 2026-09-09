@@ -5,6 +5,7 @@ import os
 import queue
 import threading
 import tkinter as tk
+import traceback
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 
@@ -57,6 +58,7 @@ class App:
             except Exception:
                 pass
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.root.report_callback_exception = self._on_callback_exception
 
         palette = self.settings.get("theme", "light")
         self.theme = Theme(self.root, palette, self.scale)
@@ -90,6 +92,23 @@ class App:
                 pass
         if self.notebook.index(self.notebook.select()) == 0:
             self.p1.plate.focus()
+
+    def _on_callback_exception(self, exc_type, exc_value, exc_traceback):
+        """Без этого ошибки внутри обработчиков (клик по кнопке и т.п.)
+        в --windowed сборке пропадают бесследно: у Tk нет консоли, и штатный
+        report_callback_exception просто пишет в отсутствующий stderr, из-за
+        чего кажется, что кнопка «ничего не делает»."""
+        if issubclass(exc_type, KeyboardInterrupt):
+            return
+        message = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        config.write_crash_log(message)
+        try:
+            messagebox.showerror(
+                "Ошибка",
+                f"Действие не выполнено из-за ошибки:\n{exc_value}\n\n"
+                f"Подробности записаны в файл:\n{config.CRASH_LOG_FILE}")
+        except Exception:
+            pass
 
     @staticmethod
     def _parse_geometry(spec: str) -> tuple[int, int]:
@@ -176,27 +195,39 @@ class App:
             self.root.destroy()
 
     def open_blacklist(self):
-        win = self.theme.toplevel(self.root, "Черный список", resizable=(True, True))
-        win.geometry("760x520")
-        body = tk.Frame(win, bg=self.theme.c("ground"))
-        body.pack(fill="both", expand=True, padx=self.theme.sp(4), pady=self.theme.sp(4))
-        tk.Label(body, text="Реестр нарушителей", bg=self.theme.c("ground"),
-                 fg=self.theme.c("ink"), font=self.theme.font("title")).pack(anchor="w")
+        th = self.theme
+        win = th.toplevel(self.root, "Черный список", resizable=(True, True))
+        w, h = int(780 * th.scale), int(600 * th.scale)
+        win.geometry(f"{w}x{h}")
+        win.minsize(int(640 * th.scale), int(440 * th.scale))
+
+        # Кнопки пакуются к нижнему краю ПЕРВЫМИ (до остального содержимого),
+        # чтобы при нехватке высоты окна (например, при масштабе Windows
+        # 125-200%) обрезалась область с таблицей, а не кнопки — иначе
+        # «Добавить» просто уходит за пределы окна и выглядит как
+        # отсутствующая функциональность.
+        buttons = tk.Frame(win, bg=th.c("ground"))
+        buttons.pack(side="bottom", fill="x", padx=th.sp(4), pady=(0, th.sp(4)))
+
+        body = tk.Frame(win, bg=th.c("ground"))
+        body.pack(fill="both", expand=True, padx=th.sp(4), pady=(th.sp(4), 0))
+        tk.Label(body, text="Реестр нарушителей", bg=th.c("ground"),
+                 fg=th.c("ink"), font=th.font("title")).pack(anchor="w")
         columns = ("plate", "fio", "incident", "created_at")
         tree = ttk.Treeview(body, columns=columns, show="headings", height=12)
         for key, title, width in (("plate", "Госномер", 130), ("fio", "ФИО", 190),
                                   ("incident", "Инцидент", 300), ("created_at", "Дата", 120)):
             tree.heading(key, text=title)
             tree.column(key, width=width, anchor="w")
-        tree.pack(fill="both", expand=True, pady=(self.theme.sp(3), self.theme.sp(3)))
+        tree.pack(fill="both", expand=True, pady=(th.sp(3), th.sp(3)))
 
-        fields = tk.Frame(body, bg=self.theme.c("ground"))
+        fields = tk.Frame(body, bg=th.c("ground"))
         fields.pack(fill="x")
-        plate = Field(fields, self.theme, "Госномер")
-        plate.pack(side="left", fill="x", expand=True, padx=(0, self.theme.sp(2)))
-        fio = Field(fields, self.theme, "ФИО")
-        fio.pack(side="left", fill="x", expand=True, padx=(0, self.theme.sp(2)))
-        incident = Field(fields, self.theme, "Описание нарушения")
+        plate = Field(fields, th, "Госномер")
+        plate.pack(side="left", fill="x", expand=True, padx=(0, th.sp(2)))
+        fio = Field(fields, th, "ФИО")
+        fio.pack(side="left", fill="x", expand=True, padx=(0, th.sp(2)))
+        incident = Field(fields, th, "Описание нарушения")
         incident.pack(side="left", fill="x", expand=True)
 
         def refresh():
@@ -225,12 +256,10 @@ class App:
                 blacklist.remove(selected[0])
                 refresh()
 
-        buttons = tk.Frame(body, bg=self.theme.c("ground"))
-        buttons.pack(fill="x", pady=(self.theme.sp(3), 0))
         ttk.Button(buttons, text="Добавить", command=add_entry,
-                   style="Primary.TButton").pack(side="left")
+                   style="Primary.TButton").pack(side="left", pady=(th.sp(3), 0))
         ttk.Button(buttons, text="Удалить выбранную", command=remove_entry,
-                   style="Danger.TButton").pack(side="left", padx=(self.theme.sp(2), 0))
+                   style="Danger.TButton").pack(side="left", padx=(th.sp(2), 0), pady=(th.sp(3), 0))
         refresh()
 
     def _load_printers(self):
