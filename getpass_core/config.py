@@ -23,15 +23,32 @@ else:
     BUNDLE_DIR = SCRIPT_DIR
 
 _FONT_DIR_NAMES = ("fonts", "fronts")
+_DEFAULT_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _resolve_fonts_dir() -> str:
-    for base in (BUNDLE_DIR, SCRIPT_DIR):
+    # В обычном запуске корень проекта и bundle-root совпадают, поэтому поиск
+    # должен идти по обоим путям. Но если код тестирует или подменяет
+    # SCRIPT_DIR, этот override должен иметь приоритет и не должен "схлопываться"
+    # на реальный каталог репозитория.
+    script_dir = os.path.abspath(SCRIPT_DIR)
+    bundle_dir = os.path.abspath(BUNDLE_DIR)
+    roots = [script_dir]
+
+    if os.path.abspath(_DEFAULT_PROJECT_ROOT) == bundle_dir:
+        if script_dir != bundle_dir:
+            roots = [script_dir]
+        else:
+            roots = [script_dir, bundle_dir]
+    elif bundle_dir != script_dir:
+        roots = [script_dir, bundle_dir]
+
+    for base in roots:
         for name in _FONT_DIR_NAMES:
             candidate = os.path.join(base, name)
             if os.path.isdir(candidate):
                 return candidate
-    return os.path.join(SCRIPT_DIR, "fonts")
+    return os.path.join(script_dir, "fonts")
 
 
 FONTS_DIR = _resolve_fonts_dir()
