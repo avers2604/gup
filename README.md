@@ -156,6 +156,8 @@ python -m pyflakes pass_generator.py getpass_core getpass_ui
 
 ## Сборка .exe
 
+Собирается только на Windows — PyInstaller не кросс-компилирует.
+
 ```
 pyinstaller --onefile --windowed --icon app_icon.ico pass_generator.py
 ```
@@ -164,3 +166,9 @@ pyinstaller --onefile --windowed --icon app_icon.ico pass_generator.py
 и `fonts/` (все три — опциональны, но без них знак ГЭТ и брендбук-шрифт
 заменяются текстовой подписью и системным шрифтом). `template.png` не
 нужен — бланки строятся кодом.
+
+**Автоматическая сборка.** `.github/workflows/build-exe.yml` собирает
+`.exe` на серверах GitHub при каждом push в `main` (и вручную — вкладка
+Actions → Сборка .exe → Run workflow). Готовый архив `GET-Passes-windows.zip`
+берите на вкладке **Releases** (релиз `latest-build`, обновляется каждой
+сборкой) — не нужна ни Windows-машина, ни установленный Python.
