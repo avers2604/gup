@@ -12,7 +12,9 @@ from getpass_core import render as R
 from getpass_core.printing import save_pdf_pages
 from getpass_core.storage import FileBusy
 
-from .widgets import CLR_BG, F, ProgressDialog, styled_button
+from .components import section_title
+from .theme import Card
+from .widgets import ProgressDialog
 
 PASS_TEMPLATE_HEADER = ["Номер пропуска", "Госномер", "Марка", "Модель", "Вид", "Цвет",
                         "Должность водителя", "ФИО водителя", "Телефон", "Зона допуска"]
@@ -58,7 +60,7 @@ def read_csv_rows(title):
     return path, rows[1:] if len(rows) > 1 else []
 
 
-def run_batch(parent, title, items, page_builder, pages_total, journal,
+def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
               log_records, default_name):
     """Общий сценарий: выбрать файл, отрисовать, записать PDF и журнал.
 
@@ -74,7 +76,7 @@ def run_batch(parent, title, items, page_builder, pages_total, journal,
     cancelled = {"flag": False}
 
     def pages():
-        with ProgressDialog(parent, title, pages_total) as dlg:
+        with ProgressDialog(parent, theme, title, pages_total) as dlg:
             for idx, page in enumerate(page_builder(), start=1):
                 if dlg.cancelled:
                     cancelled["flag"] = True
@@ -180,21 +182,24 @@ def badge_pages(items):
         yield R.build_badge_a4_grid(chunk)
 
 
-def open_batch_dialog(parent, title, intro, on_template, on_run):
-    win = tk.Toplevel(parent)
-    win.title(title)
-    win.geometry("560x290")
-    win.transient(parent)
+def open_batch_dialog(parent, theme, title, intro, on_template, on_run):
+    th = theme
+    win = th.toplevel(parent, title, resizable=(False, False))
+    w, h = int(560 * th.scale), int(320 * th.scale)
+    win.geometry(f"{w}x{h}")
     win.grab_set()
-    frame = ttk.Frame(win, padding="20")
-    frame.pack(fill="both", expand=True)
-    ttk.Label(frame, text=title, font=F(11, True)).pack(anchor="w", pady=(0, 10))
-    ttk.Label(frame, text=intro, justify="left").pack(anchor="w", pady=(0, 15))
-    tk.Button(frame, text="📥 1. Скачать пустой шаблон (CSV)", command=on_template,
-              bg="#ECEFF1", font=F(10), pady=6, relief="groove",
-              cursor="hand2").pack(fill="x", pady=4)
-    styled_button(frame, "🚀 2. Выбрать файл и напечатать массово",
-                  lambda: (win.destroy(), on_run()), "#0A2540",
-                  font=F(10, True), pady=8).pack(fill="x", pady=6)
-    tk.Label(frame, text="Печать можно прервать кнопкой «Отмена» в окне прогресса.",
-             bg=CLR_BG, fg="#829AB1", font=F(8, italic=True)).pack(anchor="w", pady=(8, 0))
+    card = Card(win, th)
+    card.pack(fill="both", expand=True, padx=th.sp(3), pady=th.sp(3))
+    b = card.body
+    section_title(b, th, title).pack(anchor="w", pady=(0, th.sp(3)))
+    tk.Label(b, text=intro, bg=th.c("surface"), fg=th.c("ink_muted"),
+             font=th.font("body"), justify="left").pack(anchor="w", pady=(0, th.sp(4)))
+    ttk.Button(b, text="1. Скачать пустой шаблон (CSV)", command=on_template,
+              style="Ghost.TButton").pack(fill="x", pady=(0, th.sp(2)))
+    ttk.Button(b, text="2. Выбрать файл и напечатать массово",
+              command=lambda: (win.destroy(), on_run()),
+              style="Primary.TButton").pack(fill="x")
+    tk.Label(b, text="Печать можно прервать кнопкой «Отмена» в окне прогресса.",
+             bg=th.c("surface"), fg=th.c("ink_faint"), font=th.font("caption")
+             ).pack(anchor="w", pady=(th.sp(3), 0))
+    card.fit()

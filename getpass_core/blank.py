@@ -54,6 +54,7 @@ _ASSETS_DIR = os.path.join(config.SCRIPT_DIR, "assets")
 LOGO_FILE = os.path.join(_ASSETS_DIR, "logo_get.png")
 
 _logo_cache: dict = {}
+_knockout_cache: dict = {}
 _blank_cache: dict = {}
 
 
@@ -76,6 +77,25 @@ def load_logo(width: int):
     logo = logo.resize((width, height), Image.Resampling.LANCZOS)
     _logo_cache[width] = logo
     return logo.copy()
+
+
+def load_logo_knockout(width: int):
+    """Белая выворотка знака — брендбук разрешает её на тёмно-синем и чёрном.
+
+    Используется в интерфейсе на тёмных панелях (шапка, боковая навигация),
+    где цветной знак на тёмном фоне не читается.
+    """
+    cached = _knockout_cache.get(width)
+    if cached is not None:
+        return cached.copy()
+    base = load_logo(width)
+    if base is None:
+        return None
+    white = Image.new("RGBA", base.size, (255, 255, 255, 0))
+    alpha = base.getchannel("A")
+    white.putalpha(alpha)
+    _knockout_cache[width] = white
+    return white.copy()
 
 
 def _rounded(draw, box, radius=RADIUS, width=BORDER_W, outline=C_BORDER, fill=None):

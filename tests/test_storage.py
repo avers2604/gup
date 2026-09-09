@@ -155,3 +155,30 @@ class TestExport:
     def test_export_of_empty_journal(self, journal, tmp_path):
         from getpass_core.storage import export_journal
         assert export_journal(journal, str(tmp_path / "пусто.csv")) == 0
+
+
+class TestDistinctAndBrands:
+    def test_distinct_returns_sorted_unique_nonempty(self, journal):
+        journal.append_many([
+            {"num": "1", "plate": "А1АА78", "zone": "Парковка"},
+            {"num": "2", "plate": "А2АА78", "zone": 'ПТО "Шаврова"'},
+            {"num": "3", "plate": "А3АА78", "zone": "Парковка"},
+            {"num": "4", "plate": "А4АА78", "zone": ""},
+        ])
+        assert journal.distinct("zone") == ["Парковка", 'ПТО "Шаврова"']
+
+    def test_distinct_on_empty_journal(self, journal):
+        assert journal.distinct("zone") == []
+
+    def test_known_car_brands_sorted_and_deduped(self, data_dir):
+        from getpass_core.storage import known_car_brands, update_cars_cache
+        update_cars_cache([
+            {"plate": "А1АА78", "brand": "ГАЗ"},
+            {"plate": "А2АА78", "brand": "ПАЗ"},
+            {"plate": "А3АА78", "brand": "ГАЗ"},
+        ])
+        assert known_car_brands() == ["ГАЗ", "ПАЗ"]
+
+    def test_known_car_brands_empty_when_no_cache(self, data_dir):
+        from getpass_core.storage import known_car_brands
+        assert known_car_brands() == []

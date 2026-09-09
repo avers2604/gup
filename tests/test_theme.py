@@ -135,3 +135,70 @@ class TestThemeEngine:
         card.fit()
         root.update()
         assert card.winfo_reqheight() > card.body.winfo_reqheight()
+
+
+@needs_display
+class TestComponents:
+    @pytest.fixture
+    def root(self):
+        r = tkinter.Tk()
+        yield r
+        try:
+            r.destroy()
+        except Exception:
+            pass
+
+    def test_field_required_validation_toggles(self, root):
+        from getpass_ui.theme import Theme
+        from getpass_ui.components import Field
+        th = Theme(root, "light")
+        f = Field(root, th, "Госномер", required=True)
+        f.pack()
+        assert f.validate() is False
+        assert f.widget.instate(["invalid"])
+        f.set("О777ТВ198")
+        assert f.validate() is True
+        assert not f.widget.instate(["invalid"])
+
+    def test_field_not_required_never_invalid(self, root):
+        from getpass_ui.theme import Theme
+        from getpass_ui.components import Field
+        th = Theme(root, "light")
+        f = Field(root, th, "Марка")
+        f.pack()
+        assert f.validate() is True
+
+    def test_autocomplete_shows_matches_and_hides_when_empty(self, root):
+        from getpass_ui.theme import Theme
+        from getpass_ui.components import AutocompleteEntry
+        th = Theme(root, "light")
+        ac = AutocompleteEntry(root, th, "Марка", lambda: ["ГАЗ", "ПАЗ", "ЛиАЗ"])
+        ac.pack()
+        root.update()
+        ac.widget.insert(0, "га")
+        ac._on_key(type("E", (), {"keysym": "a"})())
+        root.update()
+        assert ac._popup is not None and ac._popup.winfo_ismapped()
+        ac.set("")
+        ac._on_key(type("E", (), {"keysym": "BackSpace"})())
+        root.update()
+        assert not ac._popup.winfo_ismapped()
+
+    def test_brand_logo_survives_across_separate_roots(self):
+        """Регрессия: PhotoImage кэшировался глобально и переживал уничтожение
+        своего Tk-интерпретатора — второе окно получало мёртвую картинку
+        и падало с TclError "image ... doesn't exist"."""
+        from getpass_ui.theme import Theme
+        from getpass_ui.components import brand_logo
+        for _ in range(2):
+            r = tkinter.Tk()
+            try:
+                th = Theme(r, "light")
+                logo = brand_logo(th, 160, knockout=True)
+                if logo is not None:
+                    lbl = tkinter.Label(r, image=logo)
+                    lbl.image = logo
+                    lbl.pack()
+                    r.update()
+            finally:
+                r.destroy()

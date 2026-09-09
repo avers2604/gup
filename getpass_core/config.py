@@ -190,6 +190,7 @@ DEFAULT_SETTINGS = {
     "last_printer": "По умолчанию",
     "auto_preview_target": "1",
     "warn_duplicates": True,
+    "theme": "light",
 }
 
 

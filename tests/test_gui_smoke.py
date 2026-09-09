@@ -193,7 +193,7 @@ def test_badge_tab_input_fields_are_visible(app):
     b = app.badge
     fields = {
         "Подразделение": b.park, "Табельный номер": b.tab_num, "Должность": b.role,
-        "Фамилия": b.sur_ent, "Имя": b.nam_ent, "Отчество": b.pat_ent,
+        "Фамилия": b.sur_field, "Имя": b.nam_field, "Отчество": b.pat_field,
         "Телефон": b.phone, "Выдан": b.issue, "До": b.valid,
     }
     hidden = {name: _really_visible(w)[1] for name, w in fields.items()
@@ -223,7 +223,7 @@ def test_export_button_is_present(app):
         found = [] if found is None else found
         for child in widget.winfo_children():
             try:
-                if child.winfo_class() == "Button":
+                if child.winfo_class() in ("Button", "TButton"):
                     found.append(child.cget("text"))
             except Exception:
                 pass
@@ -244,7 +244,8 @@ def test_crop_window_fits_small_screen(app, monkeypatch):
     from getpass_ui.crop_window import CropWindow
     monkeypatch.setattr(app.root, "winfo_screenwidth", lambda: 1366)
     monkeypatch.setattr(app.root, "winfo_screenheight", lambda: 768)
-    window = CropWindow(app.root, Image.new("RGB", (1200, 1600), "#888"), lambda *a: None)
+    window = CropWindow(app.root, Image.new("RGB", (1200, 1600), "#888"), lambda *a: None,
+                        app.theme)
     pump(app.root, 0.5)
     geometry = window.win.geometry().split("+")[0]
     width, height = (int(v) for v in geometry.split("x"))
