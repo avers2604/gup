@@ -9,6 +9,7 @@ from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 
 from getpass_core import backup as backup_mod
+from getpass_core import blacklist
 from getpass_core import config, printing
 from getpass_core.domain import (add_months_safe, add_years_safe, format_date,
                                  next_number, parse_date)
@@ -156,6 +157,8 @@ class App:
                    style="Ghost.TButton").pack(side="right", padx=(th.sp(2), 0))
         ttk.Button(bar, text="Бэкап", command=self.backup_database,
                    style="Ghost.TButton").pack(side="right", padx=(th.sp(2), 0))
+        ttk.Button(bar, text="Черный список", command=self.open_blacklist,
+               style="Danger.TButton").pack(side="right", padx=(th.sp(2), 0))
         ttk.Button(bar, text="Тёмная тема" if not th.is_dark else "Светлая тема",
                    command=self.toggle_theme, style="Ghost.TButton"
                    ).pack(side="right")
@@ -171,6 +174,64 @@ class App:
             self.preview.cancel()
             self.badge.preview.cancel()
             self.root.destroy()
+
+    def open_blacklist(self):
+        win = self.theme.toplevel(self.root, "Черный список", resizable=(True, True))
+        win.geometry("760x520")
+        body = tk.Frame(win, bg=self.theme.c("ground"))
+        body.pack(fill="both", expand=True, padx=self.theme.sp(4), pady=self.theme.sp(4))
+        tk.Label(body, text="Реестр нарушителей", bg=self.theme.c("ground"),
+                 fg=self.theme.c("ink"), font=self.theme.font("title")).pack(anchor="w")
+        columns = ("plate", "fio", "incident", "created_at")
+        tree = ttk.Treeview(body, columns=columns, show="headings", height=12)
+        for key, title, width in (("plate", "Госномер", 130), ("fio", "ФИО", 190),
+                                  ("incident", "Инцидент", 300), ("created_at", "Дата", 120)):
+            tree.heading(key, text=title)
+            tree.column(key, width=width, anchor="w")
+        tree.pack(fill="both", expand=True, pady=(self.theme.sp(3), self.theme.sp(3)))
+
+        fields = tk.Frame(body, bg=self.theme.c("ground"))
+        fields.pack(fill="x")
+        plate = Field(fields, self.theme, "Госномер")
+        plate.pack(side="left", fill="x", expand=True, padx=(0, self.theme.sp(2)))
+        fio = Field(fields, self.theme, "ФИО")
+        fio.pack(side="left", fill="x", expand=True, padx=(0, self.theme.sp(2)))
+        incident = Field(fields, self.theme, "Описание нарушения")
+        incident.pack(side="left", fill="x", expand=True)
+
+        def refresh():
+            tree.delete(*tree.get_children())
+            for item in blacklist.load():
+                tree.insert("", "end", iid=item.get("id"), values=(
+                    item.get("plate", ""), item.get("fio", ""),
+                    item.get("incident", ""), item.get("created_at", "")))
+
+        def add_entry():
+            if not plate.get().strip() and not fio.get().strip():
+                messagebox.showwarning("Недостаточно данных", "Укажите госномер или ФИО.", parent=win)
+                return
+            if not incident.get().strip():
+                messagebox.showwarning("Нет описания", "Опишите прошлый инцидент.", parent=win)
+                return
+            blacklist.add(plate.get(), fio.get(), incident.get())
+            plate.delete(0, tk.END)
+            fio.delete(0, tk.END)
+            incident.delete(0, tk.END)
+            refresh()
+
+        def remove_entry():
+            selected = tree.selection()
+            if selected and messagebox.askyesno("Удалить запись", "Удалить выбранную запись?", parent=win):
+                blacklist.remove(selected[0])
+                refresh()
+
+        buttons = tk.Frame(body, bg=self.theme.c("ground"))
+        buttons.pack(fill="x", pady=(self.theme.sp(3), 0))
+        ttk.Button(buttons, text="Добавить", command=add_entry,
+                   style="Primary.TButton").pack(side="left")
+        ttk.Button(buttons, text="Удалить выбранную", command=remove_entry,
+                   style="Danger.TButton").pack(side="left", padx=(self.theme.sp(2), 0))
+        refresh()
 
     def _load_printers(self):
         try:
@@ -427,7 +488,15 @@ class App:
             self.save_settings()
             self.preview.cancel()
             self.badge.preview.cancel()
+            threading.Thread(target=self._rotate_backups, daemon=False).start()
             self.root.destroy()
+
+    @staticmethod
+    def _rotate_backups():
+        try:
+            backup_mod.rotate_backups(14)
+        except Exception:
+            pass
 
     def _startup_checks(self):
         problems = []
@@ -522,10 +591,26 @@ class App:
         return issue, valid
 
     def _check_duplicates(self, forms):
-        if not self.settings.get("warn_duplicates", True):
-            return True
         for form in forms:
             data = form.data()
+            incidents = blacklist.find(data["plate"], data["d_fio"])
+            if incidents:
+                details = "\n".join(
+                    f"  • {item.get('created_at', '')}: {item.get('incident', '')}"
+                    for item in incidents[:5])
+                messagebox.showwarning(
+                    "ВНИМАНИЕ: черный список",
+                    f"Найдено совпадение по госномеру или ФИО.\n\n{details}",
+                    parent=self.root)
+                if not messagebox.askyesno(
+                        "ВНИМАНИЕ: запись в черном списке",
+                        f"Совпадение по госномеру или ФИО:\n"
+                        f"{data['plate']} / {data['d_fio'] or 'ФИО не указано'}\n\n"
+                        f"Прошлые инциденты:\n{details}\n\n"
+                        "Продолжить выдачу пропуска?"):
+                    return False
+                if not self.settings.get("warn_duplicates", True):
+                    continue
             if not data["plate"]:
                 continue
             dups = PASS_JOURNAL.find_duplicates(data["plate"])

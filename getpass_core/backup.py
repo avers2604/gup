@@ -6,7 +6,7 @@ import shutil
 import sqlite3
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from . import config
 
@@ -78,6 +78,26 @@ def create_backup(filepath: str) -> tuple[int, int]:
                 pass
 
     return len(items), total
+
+
+def rotate_backups(retention_days: int = 14, now: datetime | None = None) -> str:
+    """Создать автоматический архив и удалить архивы старше срока хранения."""
+    now = now or datetime.now()
+    os.makedirs(config.BACKUP_DIR, exist_ok=True)
+    filename = f"backup_{now.strftime('%Y-%m-%d_%H-%M-%S')}.zip"
+    filepath = os.path.join(config.BACKUP_DIR, filename)
+    create_backup(filepath)
+    cutoff = now - timedelta(days=retention_days)
+    for name in os.listdir(config.BACKUP_DIR):
+        if not name.lower().endswith(".zip") or name == filename:
+            continue
+        candidate = os.path.join(config.BACKUP_DIR, name)
+        try:
+            if datetime.fromtimestamp(os.path.getmtime(candidate)) < cutoff:
+                os.remove(candidate)
+        except (OSError, ValueError):
+            continue
+    return filepath
 
 
 def _manifest_text(items) -> str:

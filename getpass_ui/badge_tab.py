@@ -9,6 +9,7 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import ImageTk
 
 from getpass_core import config, printing
+from getpass_core import blacklist
 from getpass_core import render as R
 from getpass_core.domain import (add_years_safe, format_date, next_number,
                                  parse_date, split_fio)
@@ -116,7 +117,7 @@ class BadgePanel:
         self.nam_var.trace_add("write", self._make_upper(self.nam_var, self.nam_field))
         self.pat_var.trace_add("write", self._make_upper(self.pat_var, self.pat_field))
 
-        self.phone = Field(b, th, "Телефон (для базы и КПП)")
+        self.phone = Field(b, th, "Телефон (для базы и КПП)", mask="phone")
         self.phone.pack(fill="x")
         card.fit()
 
@@ -303,10 +304,26 @@ class BadgePanel:
                 + "\n\nВыдать ещё один?"):
             return None
         pat = self.pat_var.get().strip()
+        fio = split_fio(sur, nam, pat)
+        incidents = blacklist.find(fio=fio)
+        if incidents:
+            details = "\n".join(
+                f"  • {item.get('created_at', '')}: {item.get('incident', '')}"
+                for item in incidents[:5])
+            messagebox.showwarning(
+                "ВНИМАНИЕ: черный список",
+                f"ФИО найдено в реестре нарушителей.\n\n{details}",
+                parent=self.root)
+            if not messagebox.askyesno(
+                    "ВНИМАНИЕ: запись в черном списке",
+                    f"ФИО найдено в реестре нарушителей:\n{fio}\n\n"
+                    f"Прошлые инциденты:\n{details}\n\n"
+                    "Продолжить выдачу пропуска?"):
+                return None
         return {"tab_num": tab_num, "park": self.park.get().strip(),
                 "role": self.role.get().strip() or "Сотрудник",
                 "surname": sur, "name": nam, "patronymic": pat,
-                "fio": split_fio(sur, nam, pat), "phone": self.phone.get().strip(),
+                "fio": fio, "phone": self.phone.get().strip(),
                 "issue_date": format_date(issue), "valid_until": format_date(valid),
                 "photo_path": self.photo_path}
 

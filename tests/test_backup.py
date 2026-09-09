@@ -1,4 +1,5 @@
 import zipfile
+from datetime import datetime, timedelta
 
 from getpass_core import backup
 
@@ -54,3 +55,17 @@ def test_manifest_warns_about_personal_data(tmp_path, data_dir, monkeypatch):
         text = z.read(backup.MANIFEST).decode("utf-8")
     assert "персональные данные" in text
     assert "НЕ зашифрован" in text
+
+
+def test_rotate_backups_removes_archives_older_than_retention(tmp_path, data_dir, monkeypatch):
+    from getpass_core import config
+    monkeypatch.setattr(config, "BACKUP_DIR", str(tmp_path / "backups"))
+    old = tmp_path / "backups" / "backup_old.zip"
+    old.parent.mkdir()
+    old.write_bytes(b"old")
+    old_time = (datetime.now() - timedelta(days=15)).timestamp()
+    import os
+    os.utime(old, (old_time, old_time))
+    created = backup.rotate_backups(14)
+    assert created.endswith(".zip")
+    assert not old.exists()

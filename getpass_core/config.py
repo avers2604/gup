@@ -127,6 +127,8 @@ BADGE_LOG_CSV = os.path.join(DATA_DIR, "журнал_бейджей.csv")
 BADGE_LOG_XLSX = os.path.join(DATA_DIR, "журнал_бейджей.xlsx")
 CARS_CACHE_FILE = os.path.join(DATA_DIR, "cars_database.json")
 CRASH_LOG_FILE = os.path.join(DATA_DIR, "crash.log")
+BACKUP_DIR = os.path.join(DATA_DIR, "backups")
+BLACKLIST_FILE = os.path.join(DATA_DIR, "blacklist.json")
 
 
 def harden_data_dir() -> bool:

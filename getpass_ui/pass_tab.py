@@ -71,7 +71,7 @@ class PassForm:
         row3 = hbox(pad, theme)
         self.d_fio = Field(row3, theme, "ФИО")
         self.d_fio.pack(side="left", fill="x", expand=True, padx=(0, theme.sp(3)))
-        self.d_phone = Field(row3, theme, "Телефон", width=15)
+        self.d_phone = Field(row3, theme, "Телефон", width=15, mask="phone")
         self.d_phone.pack(side="left")
 
         self.territory = Field(pad, theme, "Зона допуска", kind="combobox",

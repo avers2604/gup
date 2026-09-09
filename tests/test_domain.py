@@ -3,6 +3,7 @@ from datetime import datetime
 import pytest
 
 from getpass_core.domain import (add_months_safe, add_years_safe, format_plate_visual,
+                                 format_phone,
                                  get_excel_col_letter, is_active_on, next_number,
                                  normalize_plate, parse_date)
 
@@ -67,6 +68,12 @@ class TestPlates:
 
     def test_unknown_format_passes_through(self):
         assert format_plate_visual("нестандарт") == "НЕСТАНДАРТ"
+
+
+class TestPhones:
+    def test_phone_is_limited_and_formatted(self):
+        assert format_phone("8 (921) 111-22-33 extra") == "+7 (921) 111-22-33"
+        assert format_phone("+79211112233") == "+7 (921) 111-22-33"
 
 
 def test_excel_columns():

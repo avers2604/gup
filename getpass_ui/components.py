@@ -7,6 +7,7 @@ from tkinter import ttk
 from PIL import ImageTk
 
 from getpass_core.blank import load_logo, load_logo_knockout
+from getpass_core.domain import format_phone, phone_digits
 
 from .theme import Theme, field_label, status_dot
 
@@ -22,7 +23,8 @@ class Field(tk.Frame):
     """Капительная подпись + поле ввода — одна визуальная единица."""
 
     def __init__(self, parent, theme: Theme, label: str, kind: str = "entry",
-                 values=None, width=None, textvariable=None, required=False, **kw):
+                 values=None, width=None, textvariable=None, required=False,
+                 mask=None, **kw):
         bg = parent.cget("bg")
         super().__init__(parent, bg=bg)
         self.theme = theme
@@ -44,9 +46,33 @@ class Field(tk.Frame):
             self._mark_label()
         self.widget.bind("<KeyRelease>", lambda e: self.validate(), add="+")
         self.widget.bind("<FocusOut>", lambda e: self.validate(), add="+")
+        if mask == "phone":
+            validate = self.widget.register(self._valid_phone_input)
+            self.widget.configure(validate="key", validatecommand=(validate, "%P"))
+            self.widget.bind("<KeyRelease>", self._format_phone_input, add="+")
 
     def _mark_label(self):
         self._label_widget.config(text=f"{self._base_text.upper()} *")
+
+    @staticmethod
+    def _valid_phone_input(proposed):
+        allowed = set("0123456789+()- ")
+        return all(char in allowed for char in proposed) and len(phone_digits(proposed)) <= 10
+
+    def _format_phone_input(self, _event=None):
+        if getattr(self, "_formatting", False):
+            return
+        current = self.get()
+        formatted = format_phone(current)
+        if current == formatted:
+            return
+        self._formatting = True
+        try:
+            self.widget.delete(0, tk.END)
+            self.widget.insert(0, formatted)
+            self.widget.icursor(tk.END)
+        finally:
+            self._formatting = False
 
     def get(self):
         return self.widget.get()

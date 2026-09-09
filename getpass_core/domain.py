@@ -93,6 +93,34 @@ def plate_key(plate_raw: str | None) -> str:
     return normalize_plate(plate_raw)
 
 
+def phone_digits(value: str | None) -> str:
+    """Вернуть до десяти цифр российского номера без кода страны."""
+    digits = re.sub(r"\D", "", value or "")
+    if digits.startswith("8"):
+        digits = digits[1:]
+    elif digits.startswith("7"):
+        digits = digits[1:]
+    return digits[:10]
+
+
+def format_phone(value: str | None) -> str:
+    """Форматировать ввод телефона как +7 (XXX) XXX-XX-XX."""
+    digits = phone_digits(value)
+    chunks = [digits[:3], digits[3:6], digits[6:8], digits[8:10]]
+    result = "+7"
+    if chunks[0]:
+        result += " (" + chunks[0]
+    if len(digits) >= 3:
+        result += ")"
+    if chunks[1]:
+        result += " " + chunks[1]
+    if chunks[2]:
+        result += "-" + chunks[2]
+    if chunks[3]:
+        result += "-" + chunks[3]
+    return result if digits else ""
+
+
 _PLATE_PATTERNS = (
     (re.compile(r"^([А-Я])(\d{3})([А-Я]{2})(\d{2,3})$"), "{0}  {1}  {2}   {3}"),
     (re.compile(r"^([А-Я]{2})(\d{4})(\d{2,3})$"), "{0}  {1}   {2}"),
