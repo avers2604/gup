@@ -483,16 +483,20 @@ class App:
         if issue is None:
             # раньше сюда молча подставлялась сегодняшняя дата, несмотря на
             # показанное предупреждение — документ печатался не с той датой
+            self.entry_issue.widget.state(["invalid"])
             messagebox.showwarning("Некорректная дата выдачи",
                                    f"Поле «Дата выдачи»: «{raw_issue}»\nФормат: ДД.ММ.ГГГГ")
             self.entry_issue.focus()
             return None, None
+        self.entry_issue.widget.state(["!invalid"])
         valid = parse_date(self.entry_valid.get())
         if valid is None:
+            self.entry_valid.widget.state(["invalid"])
             messagebox.showwarning("Укажите срок",
                                    "Заполните поле «Действителен до» (ДД.ММ.ГГГГ).")
             self.entry_valid.focus()
             return None, None
+        self.entry_valid.widget.state(["!invalid"])
         if valid < issue:
             messagebox.showwarning("Ошибка дат",
                                    "Дата окончания не может быть раньше даты выдачи!")
@@ -534,7 +538,7 @@ class App:
         issue, valid = self._validate_pass_dates()
         if issue is None:
             return None
-        if self.p1.is_empty():
+        if not self.p1.validate_required() or self.p1.is_empty():
             messagebox.showwarning("Внимание",
                                    "Заполните «Гос. номер автомобиля» во вкладке «Пропуск №1»!")
             self.notebook.select(0)

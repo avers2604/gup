@@ -131,6 +131,18 @@ def test_badge_requires_photo(app):
     assert app.badge.validated_data() is None
 
 
+def test_empty_plate_is_flagged_invalid_before_print(app, monkeypatch):
+    """Регрессия: validate_required() существовал, но никогда не вызывался
+    перед печатью — поле не подсвечивалось, хотя предупреждение появлялось."""
+    from tkinter import messagebox
+    monkeypatch.setattr(messagebox, "showwarning", lambda *a, **k: None)
+    app.notebook.select(0)
+    app.p1.plate_var.set("")
+    app.root.update()
+    assert app.build_documents() is None
+    assert "invalid" in app.p1.plate.widget.state()
+
+
 def test_journal_windows_open(app):
     app.open_pass_journal()
     app.open_badge_journal()
