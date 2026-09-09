@@ -105,6 +105,10 @@ DATA_DIR = resolve_data_dir()
 PHOTO_DIR = os.path.join(DATA_DIR, "photos")
 
 CONFIG_FILE = os.path.join(DATA_DIR, "settings.json")
+#: журналы теперь хранятся в SQLite; CSV/XLSX-пути остаются только как
+#: источник для одноразовой миграции старых установок и как файл,
+#: который перегенерируется по кнопке «Открыть в Excel»
+DB_FILE = os.path.join(DATA_DIR, "gup.sqlite3")
 LOG_CSV_FILE = os.path.join(DATA_DIR, "журнал_пропусков.csv")
 LOG_XLSX_FILE = os.path.join(DATA_DIR, "журнал_пропусков.xlsx")
 BADGE_LOG_CSV = os.path.join(DATA_DIR, "журнал_бейджей.csv")

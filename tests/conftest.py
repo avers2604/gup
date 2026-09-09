@@ -17,6 +17,7 @@ def data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CONFIG_FILE", str(d / "settings.json"))
     monkeypatch.setattr(config, "CARS_CACHE_FILE", str(d / "cars.json"))
     monkeypatch.setattr(config, "CRASH_LOG_FILE", str(d / "crash.log"))
+    monkeypatch.setattr(config, "DB_FILE", str(d / "test.sqlite3"))
     return d
 
 
@@ -26,6 +27,7 @@ def journal(data_dir):
     from getpass_core import storage
     schema = storage.JournalSchema(
         name="Тест", csv_path=str(data_dir / "j.csv"), xlsx_path=str(data_dir / "j.xlsx"),
+        table="test_journal",
         fields=storage.PASS_SCHEMA.fields, dup_key="plate",
         legacy_layouts=storage.PASS_SCHEMA.legacy_layouts)
     return storage.Journal(schema)

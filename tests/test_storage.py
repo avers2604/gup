@@ -39,11 +39,28 @@ class TestMigration:
         journal.write(journal.read())
         assert journal.read()[0]["id"] == first
 
-    def test_skips_blank_rows(self, journal):
-        journal.append_many([{"num": "001-26", "plate": "А111АА78"}])
-        with open(journal.schema.csv_path, "a", encoding="utf-8-sig") as f:
-            f.write(";;;;;;;;;;;\n")
+    def test_migration_skips_blank_rows(self, journal):
+        """Пустые строки в CSV старой версии не должны переноситься в базу
+        при одноразовой миграции."""
+        write_legacy(journal.schema.csv_path,
+                     ["Номер пропуска", "Номер машины", "Зона допуска", "Водитель",
+                      "Дата выдачи", "Действителен до"],
+                     [["001-26", "А111АА78", "Парковка", "Смирнов А.В.",
+                       "01.01.2026", "31.12.2026"], ["", "", "", "", "", ""]])
         assert len(journal.read()) == 1
+
+    def test_migration_runs_only_once(self, journal):
+        """После переноса в базу CSV старой версии больше не перечитывается —
+        иначе записи задваивались бы при каждом обращении."""
+        write_legacy(journal.schema.csv_path,
+                     ["Номер пропуска", "Номер машины", "Зона допуска", "Водитель",
+                      "Дата выдачи", "Действителен до"],
+                     [["001-26", "А111АА78", "Парковка", "Смирнов А.В.",
+                       "01.01.2026", "31.12.2026"]])
+        journal.read()                       # запускает миграцию
+        with open(journal.schema.csv_path, "a", encoding="utf-8-sig") as f:
+            f.write("002-26;В222ВВ78;Парковка;Петров П.П.;01.01.2026;31.12.2026\n")
+        assert len(journal.read()) == 1      # вторая строка CSV уже не видна
 
 
 class TestOperations:
@@ -182,6 +199,7 @@ class TestBadgePhotoReference:
         from getpass_core.storage import BADGE_SCHEMA, Journal
         schema = BADGE_SCHEMA.__class__(
             name="Тест", csv_path=str(data_dir / "b.csv"), xlsx_path=str(data_dir / "b.xlsx"),
+            table="test_badge_journal",
             fields=BADGE_SCHEMA.fields, dup_key="tab_num",
             legacy_layouts=BADGE_SCHEMA.legacy_layouts)
         badge_journal = Journal(schema)
@@ -195,6 +213,7 @@ class TestBadgePhotoReference:
         from getpass_core.storage import BADGE_SCHEMA, Journal
         schema = BADGE_SCHEMA.__class__(
             name="Тест", csv_path=str(data_dir / "b.csv"), xlsx_path=str(data_dir / "b.xlsx"),
+            table="test_badge_journal",
             fields=BADGE_SCHEMA.fields, dup_key="tab_num",
             legacy_layouts=BADGE_SCHEMA.legacy_layouts)
         badge_journal = Journal(schema)

@@ -10,8 +10,11 @@ from . import config
 #: Что кладём в архив: (путь, имя в архиве)
 def _backup_items() -> list[tuple[str, str]]:
     items = []
-    for path in (config.CONFIG_FILE, config.LOG_CSV_FILE, config.LOG_XLSX_FILE,
-                 config.BADGE_LOG_CSV, config.BADGE_LOG_XLSX, config.CARS_CACHE_FILE):
+    # DB_FILE — журналы (SQLite, актуальные данные); CSV/XLSX ниже — только
+    # остатки старых версий, которые могли сохраниться после миграции
+    for path in (config.CONFIG_FILE, config.DB_FILE, config.LOG_CSV_FILE,
+                 config.LOG_XLSX_FILE, config.BADGE_LOG_CSV, config.BADGE_LOG_XLSX,
+                 config.CARS_CACHE_FILE):
         if os.path.exists(path):
             items.append((path, "data/" + os.path.basename(path)))
     # шаблон бланка и шрифты — без них восстановленная копия неработоспособна

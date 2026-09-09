@@ -12,7 +12,7 @@ from datetime import datetime
 from tkinter import messagebox, simpledialog, ttk
 
 from getpass_core.domain import parse_date
-from getpass_core.storage import STATUS_REVOKED, FileBusy
+from getpass_core.storage import STATUS_REVOKED, FileBusy, export_records_to_xlsx
 
 from .components import Field, section_title
 from .theme import Theme
@@ -292,13 +292,16 @@ class JournalWindow:
         return False
 
     def open_excel(self):
+        """Журнал теперь хранится в SQLite, а не в XLSX — при нажатии
+        файл каждый раз пересобирается заново из текущих данных, чтобы
+        всегда открывался актуальный срез, а не устаревший снимок."""
         path = self.schema.xlsx_path
-        if not os.path.exists(path):
-            try:
-                self.journal.write(self.records)
-            except Exception as exc:
-                messagebox.showerror("Ошибка", str(exc), parent=self.win)
-                return
+        try:
+            rows = [[rec.get(k, "") for k in self.schema.keys] for rec in self.records]
+            export_records_to_xlsx(rows, self.schema.cols_def, path, self.schema.name)
+        except Exception as exc:
+            messagebox.showerror("Ошибка", str(exc), parent=self.win)
+            return
         try:
             os.startfile(path)  # noqa: attribute defined only on Windows
         except AttributeError:
