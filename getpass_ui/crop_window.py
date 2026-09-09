@@ -1,10 +1,4 @@
-"""Редактор кадрирования фотографии для бейджа.
-
-Рабочая область намеренно тёмная независимо от темы приложения — так
-удобнее оценивать кадр по лицу на фотографии, это обычная практика фото-
-редакторов. Акцентная кнопка и цвет рамки при этом взяты из фирменной
-палитры, чтобы инструмент не выглядел чужеродным вставками из другого набора.
-"""
+"""Редактор кадрирования фотографии для бейджа."""
 from __future__ import annotations
 
 import os
@@ -12,21 +6,17 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import filedialog, messagebox
 
-from PIL import Image, ImageTk
+from PIL import Image, ImageOps, ImageTk
 
 from getpass_core.crop import compute_crop_from_state
 from getpass_core.dpi import fit_to_screen, scaled
 
 from .theme import Theme
 
-#: желаемый размер области просмотра; ужимается, если экран меньше
 CANVAS_W, CANVAS_H = 700, 700
-#: минимальный зум = 1.0: фото обязано полностью закрывать рамку кадра
 MIN_SCALE, MAX_SCALE = 1.0, 6.0
-#: сколько по высоте занимают панели кнопок и подсказка
 CHROME_H = 250
 
-# студийная тёмная палитра инструмента — не зависит от темы приложения
 STUDIO_BG = "#1B2130"
 STUDIO_PANEL = "#242B3D"
 STUDIO_CANVAS = "#0E1219"
@@ -34,19 +24,23 @@ STUDIO_TEXT = "#E8EEF4"
 STUDIO_SHADE = "#0B1116"
 
 
-def open_crop_window(parent, image_path, on_apply, theme: Theme):
+def open_crop_window(parent, image_path, on_apply, theme: Theme, on_cancel=None):
     try:
-        im = Image.open(image_path).convert("RGB")
+        with Image.open(image_path) as raw_im:
+            im = ImageOps.exif_transpose(raw_im).convert("RGB")
     except Exception as exc:
         messagebox.showerror("Ошибка", f"Не удалось открыть фото:\n{exc}", parent=parent)
+        if on_cancel:
+            on_cancel()
         return None
-    return CropWindow(parent, im, on_apply, theme)
+    return CropWindow(parent, im, on_apply, theme, on_cancel=on_cancel)
 
 
 class CropWindow:
-    def __init__(self, parent, im, on_apply, theme: Theme):
+    def __init__(self, parent, im, on_apply, theme: Theme, on_cancel=None):
         self.im = im
         self.on_apply = on_apply
+        self.on_cancel = on_cancel
         self.theme = theme
         self.orig_w, self.orig_h = im.size
         scale = theme.scale
@@ -56,9 +50,6 @@ class CropWindow:
         self.win.transient(parent)
         self.win.configure(bg=STUDIO_BG)
 
-        # Раньше окно было жёстко 760x920. На ноутбуке с рабочей областью
-        # ниже этого нижняя панель с кнопками «Сохранить и применить»
-        # уезжала под панель задач и добраться до неё было нельзя.
         want_w = scaled(760, scale)
         want_h = scaled(CANVAS_H + CHROME_H, scale)
         win_w, win_h = fit_to_screen(parent, want_w, want_h, margin=100)
@@ -75,17 +66,17 @@ class CropWindow:
             frame_h = int(frame_w * 4 / 3)
         self.frame_box = ((self.canvas_w - frame_w) // 2, (self.canvas_h - frame_h) // 2,
                           frame_w, frame_h)
-        base_scale = max(frame_w / self.orig_w, frame_h / self.orig_h)
+        base_scale = max(frame_w / max(1, self.orig_w), frame_h / max(1, self.orig_h))
         self.state = {"scale": 1.0, "offset_x": 0, "offset_y": 0, "is_dragging": False,
                       "last_x": 0, "last_y": 0, "photo_tk": None, "base_scale": base_scale}
 
         self._build()
+        self.win.protocol("WM_DELETE_WINDOW", self._cancel_and_close)
         self.win.grab_set()
         self.redraw()
         self.draw_frame_overlay()
 
     def _center_on(self, parent, win_w, win_h):
-        """Разместить окно по центру родителя, не вылезая за края экрана."""
         try:
             px, py = parent.winfo_rootx(), parent.winfo_rooty()
             pw, ph = parent.winfo_width(), parent.winfo_height()
@@ -145,12 +136,10 @@ class CropWindow:
                   pady=th.px(11), padx=th.px(14), relief="flat", bd=0,
                   activebackground=th.c("line_strong"), activeforeground=STUDIO_TEXT,
                   cursor="hand2").pack(side="left", padx=(0, th.sp(2)))
-        tk.Button(self.btn_bar, text="Отмена", command=self.win.destroy,
+        tk.Button(self.btn_bar, text="Отмена", command=self._cancel_and_close,
                   bg=STUDIO_BG, fg=danger, font=th.font("body"), pady=th.px(11),
                   padx=th.px(14), relief="flat", bd=0, activebackground=STUDIO_PANEL,
                   activeforeground=danger, cursor="hand2").pack(side="right")
-
-    # ------------------------------------------------------ рисование
 
     def redraw(self):
         self.c.delete("photo")
@@ -182,7 +171,7 @@ class CropWindow:
         for i in (1, 2):
             self.c.create_line(fx + i * fw / 3, fy, fx + i * fw / 3, fy + fh,
                                fill="#FFFFFF", width=1, tags="frame")
-            self.c.create_line(fx, fy + i * fh / 3, fx + fw, fy + i * fh / 3,
+            self.c.create_line(fx, fy + i * fw / 3, fx + fw, fy + i * fh / 3,
                                fill="#FFFFFF", width=1, tags="frame")
         self._draw_face_guide(fx, fy, fw, fh)
         self.c.create_text(self.canvas_w // 2, max(14, fy - 18),
@@ -190,16 +179,11 @@ class CropWindow:
                            font=th.font("body", bold=True), tags="frame")
 
     def _draw_face_guide(self, fx, fy, fw, fh):
-        """Овал-подсказка для положения лица — не распознавание, а ориентир
-        по правилам компоновки паспортного фото: голова с небольшим полем
-        сверху, плечи ниже овала, глаза примерно на уровне верхней трети."""
         th = self.theme
         ow, oh = fw * 0.52, fh * 0.58
         cx, cy = fx + fw / 2, fy + fh * 0.40
         self.c.create_oval(cx - ow / 2, cy - oh / 2, cx + ow / 2, cy + oh / 2,
                            outline=th.c("warning"), width=2, dash=(6, 4), tags="frame")
-
-    # ------------------------------------------------------- события
 
     def zoom(self, factor):
         self.state["scale"] = max(MIN_SCALE, min(self.state["scale"] * factor, MAX_SCALE))
@@ -225,8 +209,6 @@ class CropWindow:
 
     def _on_release(self, _event):
         self.state["is_dragging"] = False
-
-    # ------------------------------------------------------ сохранение
 
     def _crop(self):
         return compute_crop_from_state(self.im, self.orig_w, self.orig_h,
@@ -255,6 +237,8 @@ class CropWindow:
             if path.lower().endswith(".png"):
                 cropped.save(path, dpi=(300, 300))
             else:
+                if cropped.mode != "RGB":
+                    cropped = cropped.convert("RGB")
                 cropped.save(path, "JPEG", quality=95, dpi=(300, 300))
             messagebox.showinfo("Сохранено",
                                 f"Фотография сохранена:\n{path}\n\n"
@@ -264,16 +248,21 @@ class CropWindow:
             messagebox.showerror("Ошибка", f"Не удалось сохранить файл:\n{exc}",
                                  parent=self.win)
 
+    def _cancel_and_close(self):
+        if self.on_cancel:
+            try:
+                self.on_cancel()
+            except Exception:
+                pass
+        self.win.destroy()
+
 
 def store_photo(cropped, photo_dir, tab_num=""):
-    """Сохранить кадр в архив фотографий и вернуть путь.
-
-    Раньше кадр писался в общий _temp_cropped_photo.jpg, который затирался
-    следующим сотрудником — перевыпустить бейдж было невозможно.
-    """
     os.makedirs(photo_dir, exist_ok=True)
     safe = "".join(ch for ch in (tab_num or "") if ch.isalnum()) or "photo"
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = os.path.join(photo_dir, f"{safe}_{stamp}.jpg")
+    if cropped.mode != "RGB":
+        cropped = cropped.convert("RGB")
     cropped.save(path, "JPEG", quality=95, dpi=(300, 300))
     return path

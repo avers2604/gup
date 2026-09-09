@@ -1,4 +1,4 @@
-"""Массовая печать из CSV — общий каркас для пропусков ТС и бейджей."""
+"""Массовая печать из CSV."""
 from __future__ import annotations
 
 import csv
@@ -51,22 +51,28 @@ def read_csv_rows(title):
                                       filetypes=[("CSV", "*.csv"), ("Все файлы", "*.*")])
     if not path:
         return None, None
-    try:
-        with open(path, "r", encoding="utf-8-sig", newline="") as f:
-            rows = list(csv.reader(f, delimiter=";"))
-    except Exception as exc:
-        messagebox.showerror("Ошибка чтения", f"Не удалось прочитать файл: {exc}")
+    rows = []
+    # Попытка прочитать в UTF-8, при неудаче — Windows-1251 (стандарт Excel)
+    encodings = ("utf-8-sig", "cp1251", "utf-8")
+    for enc in encodings:
+        try:
+            with open(path, "r", encoding=enc, newline="") as f:
+                rows = list(csv.reader(f, delimiter=";"))
+            break
+        except UnicodeDecodeError:
+            continue
+        except Exception as exc:
+            messagebox.showerror("Ошибка чтения", f"Не удалось прочитать файл: {exc}")
+            return None, None
+    else:
+        messagebox.showerror("Ошибка кодировки", "Не удалось распознать кодировку файла (требуется UTF-8 или CP1251).")
         return None, None
+
     return path, rows[1:] if len(rows) > 1 else []
 
 
 def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
               log_records, default_name):
-    """Общий сценарий: выбрать файл, отрисовать, записать PDF и журнал.
-
-    Страницы отдаются генератором и не копятся в памяти: лист А4 в 300 dpi
-    занимает ~25 МБ, и сотня листов раньше означала 2.5 ГБ до записи файла.
-    """
     save_path = filedialog.asksaveasfilename(defaultextension=".pdf",
                                              filetypes=[("PDF", "*.pdf")],
                                              initialfile=default_name)
@@ -88,6 +94,11 @@ def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
         save_pdf_pages(pages(), save_path)
     except ValueError:
         if cancelled["flag"]:
+            if os.path.exists(save_path):
+                try:
+                    os.remove(save_path)
+                except Exception:
+                    pass
             messagebox.showinfo("Отменено", "Массовая печать прервана.", parent=parent)
             return False
         messagebox.showwarning("Пусто", "Нечего печатать.", parent=parent)
@@ -97,9 +108,13 @@ def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
         return False
 
     if cancelled["flag"]:
+        if os.path.exists(save_path):
+            try:
+                os.remove(save_path)
+            except Exception:
+                pass
         messagebox.showinfo("Отменено",
-                            "Печать прервана. Частичный файл сохранён, "
-                            "в журнал ничего не записано.", parent=parent)
+                            "Печать прервана. В журнал ничего не записано.", parent=parent)
         return False
 
     try:
@@ -165,7 +180,6 @@ def parse_badge_rows(rows, folder, defaults):
 
 
 def pass_pages(items, common):
-    """Листы А4 по два пропуска. Нечётный остаток — один пропуск, без дубля."""
     for i in range(0, len(items), 2):
         img1 = R.render_pass(items[i], common)
         img2 = R.render_pass(items[i + 1], common) if i + 1 < len(items) else None
@@ -195,10 +209,10 @@ def open_batch_dialog(parent, theme, title, intro, on_template, on_run):
     tk.Label(b, text=intro, bg=th.c("surface"), fg=th.c("ink_muted"),
              font=th.font("body"), justify="left").pack(anchor="w", pady=(0, th.sp(4)))
     ttk.Button(b, text="1. Скачать пустой шаблон (CSV)", command=on_template,
-              style="Ghost.TButton").pack(fill="x", pady=(0, th.sp(2)))
+               style="Ghost.TButton").pack(fill="x", pady=(0, th.sp(2)))
     ttk.Button(b, text="2. Выбрать файл и напечатать массово",
-              command=lambda: (win.destroy(), on_run()),
-              style="Primary.TButton").pack(fill="x")
+               command=lambda: (win.destroy(), on_run()),
+               style="Primary.TButton").pack(fill="x")
     tk.Label(b, text="Печать можно прервать кнопкой «Отмена» в окне прогресса.",
              bg=th.c("surface"), fg=th.c("ink_faint"), font=th.font("caption")
              ).pack(anchor="w", pady=(th.sp(3), 0))

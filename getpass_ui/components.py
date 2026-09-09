@@ -1,6 +1,4 @@
-"""Составные элементы формы поверх theme.py: подписанное поле, автодополнение,
-статус-плашка. Строятся на Theme/Card и переиспользуются во всех экранах.
-"""
+"""Составные элементы формы поверх theme.py."""
 from __future__ import annotations
 
 import tkinter as tk
@@ -12,20 +10,8 @@ from getpass_core.blank import load_logo, load_logo_knockout
 
 from .theme import Theme, field_label, status_dot
 
+
 def brand_logo(theme: Theme, width: int, knockout: bool = True):
-    """Знак ГЭТ как PhotoImage для панели интерфейса.
-
-    knockout=True — белая выворотка для тёмных панелей (шапка, боковая
-    навигация); разрешена брендбуком на тёмно-синем и чёрном фоне.
-    Возвращает None, если файл знака недоступен — вызывающий код должен
-    обойтись без картинки, а не падать.
-
-    PhotoImage НЕ кэшируется между вызовами: он привязан к конкретному
-    интерпретатору Tk (root), и при повторном создании окна (например,
-    в тестах) кэш из прошлого — уже уничтоженного — root давал
-    "image ... doesn't exist". Готовое PIL-изображение при этом кэшируется
-    в blank.py по ширине, так что повторная отрисовка остаётся дешёвой.
-    """
     pil_img = (load_logo_knockout if knockout else load_logo)(theme.px(width))
     if pil_img is None:
         return None
@@ -33,11 +19,7 @@ def brand_logo(theme: Theme, width: int, knockout: bool = True):
 
 
 class Field(tk.Frame):
-    """Капительная подпись + поле ввода — одна визуальная единица.
-
-    Поддерживает пометку «обязательное» и подсветку в реальном времени:
-    validate() красит рамку поля, если оно обязательно и пусто.
-    """
+    """Капительная подпись + поле ввода — одна визуальная единица."""
 
     def __init__(self, parent, theme: Theme, label: str, kind: str = "entry",
                  values=None, width=None, textvariable=None, required=False, **kw):
@@ -66,9 +48,6 @@ class Field(tk.Frame):
     def _mark_label(self):
         self._label_widget.config(text=f"{self._base_text.upper()} *")
 
-    # ---- прокси к обёрнутому виджету, чтобы Field можно было использовать
-    #      там же, где раньше использовался голый ttk.Entry/Combobox
-
     def get(self):
         return self.widget.get()
 
@@ -95,31 +74,28 @@ class Field(tk.Frame):
         self.widget.focus_set()
 
     def configure_field(self, **kw):
-        """Настроить обёрнутый виджет ввода (ширину, шрифт и т.п.)."""
         self.widget.configure(**kw)
-
-    # ------------------------------------------------------- валидация
 
     def is_required(self) -> bool:
         return self._required
 
     def validate(self) -> bool:
-        """Подсветить поле, если оно обязательно и пусто. True — поле в порядке."""
         if self._required and not self.get().strip():
             self.widget.state(["invalid"])
             return False
         self.widget.state(["!invalid"])
         return True
 
+    def reset_validation(self):
+        """Снять визуальную ошибку без принудительной валидации."""
+        try:
+            self.widget.state(["!invalid"])
+        except Exception:
+            pass
+
 
 class AutocompleteEntry(Field):
-    """Поле ввода с выпадающим списком подсказок, отфильтрованным по подстроке.
-
-    `suggestions` — функция без аргументов, возвращающая актуальный список
-    вариантов (например, текущие госномера базы машин или зоны допуска).
-    Список запрашивается заново при каждом нажатии клавиши, поэтому
-    подсказки не устаревают, даже если источник данных меняется на лету.
-    """
+    """Поле ввода с выпадающим списком подсказок, отфильтрованным по подстроке."""
 
     def __init__(self, parent, theme: Theme, label: str, suggestions, **kw):
         super().__init__(parent, theme, label, kind="entry", **kw)
@@ -164,13 +140,24 @@ class AutocompleteEntry(Field):
             self._listbox.bind("<<ListboxSelect>>", self._on_pick)
             self._listbox.bind("<Return>", self._on_pick)
             self._listbox.bind("<Escape>", lambda e: self._close())
+
         self._listbox.delete(0, tk.END)
         for m in matches:
             self._listbox.insert(tk.END, m)
+
         x = self.widget.winfo_rootx()
-        y = self.widget.winfo_rooty() + self.widget.winfo_height()
         w = max(self.widget.winfo_width(), th.px(160))
-        h = min(len(matches), 8) * th.px(22) + th.px(4)
+        h = min(len(matches), 8) * th.px(24) + th.px(4)
+        y = self.widget.winfo_rooty() + self.widget.winfo_height()
+
+        # Если окно подсказок не помещается снизу, открываем его над полем
+        try:
+            screen_h = self.winfo_screenheight()
+            if y + h > screen_h - 10:
+                y = max(0, self.widget.winfo_rooty() - h)
+        except Exception:
+            pass
+
         self._popup.geometry(f"{w}x{h}+{x}+{y}")
         self._listbox.configure(height=min(len(matches), 8))
         self._popup.deiconify()
@@ -195,16 +182,14 @@ class AutocompleteEntry(Field):
         self.widget.icursor(tk.END)
 
     def _on_focus_out(self, _event=None):
-        # клик по списку сначала уводит фокус — закрываем с небольшой
-        # задержкой, чтобы выбор из списка успел обработаться
         self.after(150, self._close_if_unfocused)
 
     def _close_if_unfocused(self):
         try:
             focused = self.winfo_toplevel().focus_get()
+            if focused not in (self._listbox, self.widget):
+                self._close()
         except Exception:
-            focused = None
-        if focused not in (self._listbox, self.widget):
             self._close()
 
     def _close(self):
@@ -216,7 +201,7 @@ class AutocompleteEntry(Field):
 
 
 class StatusPill(tk.Frame):
-    """Точка + подпись состояния. Цвет не единственный носитель смысла."""
+    """Точка + подпись состояния."""
 
     def __init__(self, parent, theme: Theme, text: str, color: str, **kw):
         bg = parent.cget("bg")
@@ -227,19 +212,16 @@ class StatusPill(tk.Frame):
 
 
 def section_title(parent, theme: Theme, text: str) -> tk.Label:
-    """Заголовок блока внутри карточки."""
     return tk.Label(parent, text=text, bg=parent.cget("bg"), fg=theme.c("ink"),
                     font=theme.font("heading"), anchor="w")
 
 
 def hint(parent, theme: Theme, text: str, **kw) -> tk.Label:
-    """Мелкая серая подсказка под блоком."""
     return tk.Label(parent, text=text, bg=parent.cget("bg"), fg=theme.c("ink_faint"),
                     font=theme.font("caption"), justify="left", **kw)
 
 
 def hbox(parent, theme: Theme, pady=0) -> tk.Frame:
-    """Горизонтальная строка-контейнер того же фона, что и родитель."""
     f = tk.Frame(parent, bg=parent.cget("bg"))
     f.pack(fill="x", pady=pady)
     return f

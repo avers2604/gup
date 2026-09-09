@@ -10,13 +10,13 @@ from tkinter import filedialog, messagebox, ttk
 
 from getpass_core import backup as backup_mod
 from getpass_core import config, printing
-from getpass_core.dpi import (apply_scaling, enable_dpi_awareness, fit_to_screen,
-                              scaled)
-from getpass_core import render as R
 from getpass_core.domain import (add_months_safe, add_years_safe, format_date,
                                  next_number, parse_date)
+from getpass_core.dpi import (apply_scaling, enable_dpi_awareness, fit_to_screen,
+                              scaled)
 from getpass_core.fonts import fonts_are_missing, setup_ui_font, verify_ui_family
 from getpass_core.registry import BADGE_REGISTRY, PASS_REGISTRY, save_registry_pdf
+from getpass_core import render as R
 from getpass_core.storage import (BADGE_JOURNAL, PASS_JOURNAL, FileBusy,
                                   export_journal, known_car_brands,
                                   update_cars_cache)
@@ -32,17 +32,17 @@ from .widgets import Debouncer, ProgressDialog, make_scrollable
 
 
 class App:
-    """Владеет главным окном и состоянием. Заменяет ~130 глобальных переменных."""
+    """Владеет главным окном и состоянием."""
 
     def __init__(self):
         setup_ui_font()
         self.settings = config.load_settings()
         config.harden_data_dir()
 
-        enable_dpi_awareness()      # на случай запуска App в обход main()
+        enable_dpi_awareness()
         self.root = tk.Tk()
         self.root.title("СПб ГУП «Горэлектротранс» — Система выпуска пропусков и бейджей")
-        # масштаб экрана: на 125/150% интерфейс должен стать крупнее, а не мыльнее
+
         self.scale = apply_scaling(self.root)
         default_w, default_h = scaled(1500, self.scale), scaled(920, self.scale)
         saved_w, saved_h = self._parse_geometry(self.settings.get("window_geometry", ""))
@@ -57,9 +57,6 @@ class App:
                 pass
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        # тема строится сразу после root, но до остального интерфейса —
-        # шрифт брендбука проверяем только теперь: до создания root список
-        # семейств, которые видит Tk, недоступен
         palette = self.settings.get("theme", "light")
         self.theme = Theme(self.root, palette, self.scale)
         verify_ui_family(self.root)
@@ -95,16 +92,11 @@ class App:
 
     @staticmethod
     def _parse_geometry(spec: str) -> tuple[int, int]:
-        """Разобрать сохранённые размеры окна вида «1500x920». Пустая или
-        битая строка — обе стороны 0, вызывающий код подставит значение
-        по умолчанию."""
         try:
             width, _, height = spec.partition("x")
             return int(width), int(height)
         except (ValueError, AttributeError):
             return 0, 0
-
-    # =============================================== оформление
 
     def _zones_source(self):
         seen = list(TERRITORIES)
@@ -118,9 +110,7 @@ class App:
         header = tk.Frame(self.root, bg=th.c("primary"), height=th.px(72))
         header.pack(fill="x")
         header.pack_propagate(False)
-        # цветной знак (не белая выворотка) не читается на тёмно-синей шапке
-        # напрямую — брендбук допускает выворотку для этого случая, но
-        # белая пилюля-подложка позволяет показать сам цветной знак
+
         logo = brand_logo(th, 148, knockout=False)
         if logo is not None:
             plate = Card(header, th, radius=RADIUS["chip"], pad=2, fill="#FFFFFF")
@@ -133,6 +123,7 @@ class App:
         else:
             tk.Label(header, text="ГЭТ", font=th.font("display"), bg=th.c("primary"),
                      fg=th.c("on_primary")).pack(side="left", padx=th.sp(5))
+
         text_box = tk.Frame(header, bg=th.c("primary"))
         text_box.pack(side="left", pady=th.sp(3))
         tk.Label(text_box, text="Система выпуска пропусков", font=th.font("title"),
@@ -154,24 +145,22 @@ class App:
         self.printer_cb.pack(side="left", padx=(0, th.sp(4)))
         self.printer_cb["values"] = [self.printer_var.get()]
         self.printer_cb.bind("<<ComboboxSelected>>", lambda e: self.save_settings())
-        # перечисление принтеров занимает секунды — не держим им запуск окна.
-        # Результат забирает главный поток: вызывать tk из чужого потока нельзя.
+
         self._printer_result = queue.Queue(maxsize=1)
         threading.Thread(target=self._load_printers, daemon=True).start()
         self.root.after(300, self._poll_printers)
 
         ttk.Button(bar, text="Очистить форму", command=self.clear_current_form,
-                  style="Danger.TButton").pack(side="right", padx=(th.sp(2), 0))
+                   style="Danger.TButton").pack(side="right", padx=(th.sp(2), 0))
         ttk.Button(bar, text="Восстановить", command=self.restore_database,
-                  style="Ghost.TButton").pack(side="right", padx=(th.sp(2), 0))
+                   style="Ghost.TButton").pack(side="right", padx=(th.sp(2), 0))
         ttk.Button(bar, text="Бэкап", command=self.backup_database,
-                  style="Ghost.TButton").pack(side="right", padx=(th.sp(2), 0))
+                   style="Ghost.TButton").pack(side="right", padx=(th.sp(2), 0))
         ttk.Button(bar, text="Тёмная тема" if not th.is_dark else "Светлая тема",
-                  command=self.toggle_theme, style="Ghost.TButton"
-                  ).pack(side="right")
+                   command=self.toggle_theme, style="Ghost.TButton"
+                   ).pack(side="right")
 
     def toggle_theme(self):
-        """Переключить светлую/тёмную тему. Требует перезапуска окна."""
         current = self.settings.get("theme", "light")
         self.settings["theme"] = "dark" if current == "light" else "light"
         config.save_settings({"theme": self.settings["theme"]})
@@ -184,7 +173,6 @@ class App:
             self.root.destroy()
 
     def _load_printers(self):
-        """Выполняется в фоновом потоке: только считает список, tk не трогает."""
         try:
             names = printing.get_available_printers()
         except Exception:
@@ -209,8 +197,6 @@ class App:
         except Exception:
             pass
 
-    # =============================================== вкладка ТС
-
     def _build_pass_tab(self):
         th = self.theme
         container = tk.Frame(self.notebook, bg=th.c("ground"))
@@ -221,20 +207,20 @@ class App:
         row1 = tk.Frame(btn_bar, bg=th.c("ground"))
         row1.pack(fill="x", pady=(0, th.sp(2)))
         ttk.Button(row1, text="Сохранить PDF   (Ctrl+S)", command=self.generate_pass,
-                  style="Primary.TButton").pack(side="left", fill="x", expand=True,
-                                                padx=(0, th.sp(2)))
+                   style="Primary.TButton").pack(side="left", fill="x", expand=True,
+                                                 padx=(0, th.sp(2)))
         ttk.Button(row1, text="Напечатать сразу   (Ctrl+P)", command=self.direct_print_pass,
-                  style="Accent.TButton").pack(side="right", fill="x", expand=True)
+                   style="Accent.TButton").pack(side="right", fill="x", expand=True)
         row2 = tk.Frame(btn_bar, bg=th.c("ground"))
         row2.pack(fill="x")
         ttk.Button(row2, text="Массовая печать", command=self.open_batch_passes,
-                  style="Ghost.TButton").pack(side="left", padx=(0, th.sp(2)))
+                   style="Ghost.TButton").pack(side="left", padx=(0, th.sp(2)))
         ttk.Button(row2, text="Реестр ТС для печати", command=self.registry_passes,
-                  style="Ghost.TButton").pack(side="left", padx=(0, th.sp(2)))
+                   style="Ghost.TButton").pack(side="left", padx=(0, th.sp(2)))
         ttk.Button(row2, text="Выгрузить таблицу", command=self.export_pass_journal,
-                  style="Ghost.TButton").pack(side="left")
+                   style="Ghost.TButton").pack(side="left")
         ttk.Button(row2, text="Журнал ТС", command=self.open_pass_journal,
-                  style="Ghost.TButton").pack(side="right")
+                   style="Ghost.TButton").pack(side="right")
 
         self.pass_paned = tk.PanedWindow(container, orient="horizontal", bg=th.c("ground"),
                                          sashwidth=th.px(6), sashrelief="flat", borderwidth=0)
@@ -287,12 +273,10 @@ class App:
         self.entry_valid.pack(side="left")
         self.entry_valid.set(self.settings["valid_until"])
 
-        # галка живёт на отдельной строке: в одной строке с двумя датами
-        # её подпись не помещалась и обрезалась вместе с самим переключателем
         self.is_temp_var = tk.BooleanVar(value=self.settings.get("is_temporary_car", False))
         th.check(b, "Временный пропуск на ТС (не более 3 месяцев)",
-                self.is_temp_var, command=self.on_toggle_temp,
-                style="Warning.TCheckbutton").pack(anchor="w", pady=(th.sp(3), 0))
+                 self.is_temp_var, command=self.on_toggle_temp,
+                 style="Warning.TCheckbutton").pack(anchor="w", pady=(th.sp(3), 0))
 
         row2 = tk.Frame(b, bg=th.c("surface"))
         row2.pack(fill="x", pady=(th.sp(3), 0))
@@ -315,13 +299,13 @@ class App:
         section_title(b, th, "Формат формирования").pack(anchor="w", pady=(0, th.sp(2)))
         self.print_mode = tk.StringVar(value=self.settings["print_mode"])
         th.radio(b, "Лист А4 — два пропуска (№1 сверху, №2 снизу)", self.print_mode,
-                "a4", command=self.update_tab_states).pack(anchor="w")
+                 "a4", command=self.update_tab_states).pack(anchor="w")
         th.radio(b, "Лист А5 — один пропуск (вкладка №2 блокируется)", self.print_mode,
-                "a5", command=self.update_tab_states).pack(anchor="w")
+                 "a5", command=self.update_tab_states).pack(anchor="w")
         self.print_back_var = tk.BooleanVar(
             value=self.settings.get("print_pass_back", False))
         th.check(b, "Печатать оборот (правила пользования пропуском)",
-                self.print_back_var).pack(anchor="w", pady=(th.sp(2), 0))
+                 self.print_back_var).pack(anchor="w", pady=(th.sp(2), 0))
         card.fit()
 
     def _build_preview_panel(self, paned):
@@ -338,20 +322,18 @@ class App:
         switch = tk.Frame(head, bg=th.c("surface"))
         switch.pack(side="right")
         th.radio(switch, "№1", self.preview_target, "1",
-                command=self.preview.schedule).pack(side="left")
+                 command=self.preview.schedule).pack(side="left")
         th.radio(switch, "№2", self.preview_target, "2",
-                command=self.preview.schedule).pack(side="left", padx=(th.sp(2), 0))
+                 command=self.preview.schedule).pack(side="left", padx=(th.sp(2), 0))
         self.preview_label = tk.Label(b, bg=th.c("surface"), fg=th.c("ink_faint"),
                                       font=th.font("body"),
                                       text="Заполните поля —\nпредпросмотр появится здесь")
         self.preview_label.pack(fill="both", expand=True)
         tk.Label(b, text="Макет обновляется автоматически при вводе данных.",
-                bg=th.c("surface"), fg=th.c("ink_faint"), font=th.font("caption")
-                ).pack(pady=(th.sp(2), 0))
+                 bg=th.c("surface"), fg=th.c("ink_faint"), font=th.font("caption")
+                 ).pack(pady=(th.sp(2), 0))
         self.preview_panel.bind("<Configure>",
                                 lambda e: self.preview.schedule(delay=140))
-
-    # =============================================== предпросмотр
 
     def _initial_previews(self):
         self.badge.preview.schedule(delay=10)
@@ -375,16 +357,12 @@ class App:
             if h > max_h:
                 h, w = max_h, int(max_h / ratio)
             thumb = img.resize((max(80, w), max(60, h)), R.Image.Resampling.LANCZOS)
-            photo = R.ImageTk.PhotoImage(thumb) if hasattr(R, "ImageTk") else None
-            if photo is None:
-                from PIL import ImageTk
-                photo = ImageTk.PhotoImage(thumb)
+            from PIL import ImageTk
+            photo = ImageTk.PhotoImage(thumb)
             self.preview_label.config(image=photo, text="")
             self.preview_label.image = photo
         except Exception:
             pass
-
-    # =============================================== общие данные
 
     def common_data(self, preview=False):
         issue = parse_date(self.entry_issue.get())
@@ -416,8 +394,6 @@ class App:
         else:
             self.pass_notebook.tab(1, state="normal")
 
-    # =============================================== настройки
-
     def collect_settings(self):
         try:
             pass_paned_width = self.pass_paned.sash_coord(0)[0]
@@ -448,12 +424,10 @@ class App:
     def on_closing(self):
         if messagebox.askokcancel("Выход", "Закрыть программу?\n\n"
                                            "Введённые реквизиты будут сохранены."):
-            self.save_settings()      # раньше настройки при выходе терялись
+            self.save_settings()
             self.preview.cancel()
             self.badge.preview.cancel()
             self.root.destroy()
-
-    # =============================================== запуск/проверки
 
     def _startup_checks(self):
         problems = []
@@ -467,8 +441,6 @@ class App:
             messagebox.showwarning("Проверка окружения", "\n\n".join(problems))
 
     def _bind_hotkeys(self):
-        # bind (не bind_all): раньше Ctrl+S из окна журнала или редактора фото
-        # запускал печать главной формы
         self.root.bind("<Control-KeyPress>", self._on_ctrl)
 
     def _on_ctrl(self, event):
@@ -511,23 +483,21 @@ class App:
         territory = self.settings.get("territory", "")
         self.p1.clear(territory)
         self.p2.clear(territory)
+        self.entry_issue.reset_validation()
+        self.entry_valid.reset_validation()
         self.preview.schedule()
 
-    # =============================================== выпуск пропусков ТС
-
     def _validate_pass_dates(self):
-        """Даты для выпуска. В отличие от предпросмотра здесь ошибки блокируют."""
         raw_issue = self.entry_issue.get()
         issue = parse_date(raw_issue)
         if issue is None:
-            # раньше сюда молча подставлялась сегодняшняя дата, несмотря на
-            # показанное предупреждение — документ печатался не с той датой
             self.entry_issue.widget.state(["invalid"])
             messagebox.showwarning("Некорректная дата выдачи",
                                    f"Поле «Дата выдачи»: «{raw_issue}»\nФормат: ДД.ММ.ГГГГ")
             self.entry_issue.focus()
             return None, None
-        self.entry_issue.widget.state(["!invalid"])
+        self.entry_issue.reset_validation()
+
         valid = parse_date(self.entry_valid.get())
         if valid is None:
             self.entry_valid.widget.state(["invalid"])
@@ -535,7 +505,8 @@ class App:
                                    "Заполните поле «Действителен до» (ДД.ММ.ГГГГ).")
             self.entry_valid.focus()
             return None, None
-        self.entry_valid.widget.state(["!invalid"])
+        self.entry_valid.reset_validation()
+
         if valid < issue:
             messagebox.showwarning("Ошибка дат",
                                    "Дата окончания не может быть раньше даты выдачи!")
@@ -551,7 +522,6 @@ class App:
         return issue, valid
 
     def _check_duplicates(self, forms):
-        """Предупредить о действующем пропуске на тот же госномер."""
         if not self.settings.get("warn_duplicates", True):
             return True
         for form in forms:
@@ -573,7 +543,6 @@ class App:
         return True
 
     def build_documents(self):
-        """Собрать документ к печати. Возвращает (изображение, имя, записи, след. номер)."""
         issue, valid = self._validate_pass_dates()
         if issue is None:
             return None
@@ -632,14 +601,10 @@ class App:
         back_document = None
         if self.print_back_var.get():
             back = R.render_pass_back()
-            # тот же лист А4 разрезается на два пропуска — оборот должен
-            # совпасть с обеими половинами, поэтому дублируем его так же,
-            # как переднюю сторону в build_pass_a4_sheet
             back_document = R.build_pass_a4_sheet(back, back) if mode == "a4" else back
         return document, back_document, prefix, records, next_number(source_num)
 
     def _finish_pass(self, records, next_num):
-        """Записать журнал, базу машин и передвинуть нумерацию."""
         for rec in records:
             rec["zone"] = rec.get("territory") or "Основная (Без зоны)"
             rec["driver"] = rec.get("driver_full", "")
@@ -705,9 +670,6 @@ class App:
         else:
             ok, err = printing.send_image_to_printer(document, self.printer_var.get())
         if ok:
-            # журнал и нумерация двигаются ТОЛЬКО после успешной отправки:
-            # раньше при отказе принтера номер сгорал, а в журнале оставалась
-            # запись о невыданном пропуске
             self._finish_pass(records, next_num)
             messagebox.showinfo("Печать", "Документ успешно отправлен на принтер!")
             return
@@ -729,13 +691,10 @@ class App:
             self._finish_pass(records, next_num)
 
     def _confirm_flip_for_back_side(self) -> bool:
-        """Принтер без автодуплекса: лицевая сторона уже напечатана —
-        спросить, готов ли пользователь переложить лист для печати оборота."""
         return messagebox.askokcancel(
             "Печать оборотной стороны",
             "Лицевая сторона напечатана.\n\n"
-            "Переверните лист в лотке принтера (эта модель не поддерживает "
-            "автоматическую двухстороннюю печать) и нажмите «ОК», чтобы "
+            "Переверните лист в лотке принтера и нажмите «ОК», чтобы "
             "напечатать оборот с правилами пользования пропуском.")
 
     def export_pass_journal(self):
@@ -745,7 +704,6 @@ class App:
         self._export_journal(BADGE_JOURNAL, "Журнал_работников")
 
     def _export_journal(self, journal, name):
-        """Выгрузить журнал в отдельный файл (XLSX или CSV)."""
         if not journal.read():
             messagebox.showinfo("Журнал пуст", "В базе нет записей для выгрузки.")
             return
@@ -758,7 +716,7 @@ class App:
             return
         try:
             count = export_journal(journal, path)
-        except PermissionError:
+        except (PermissionError, FileBusy):
             messagebox.showerror("Файл занят",
                                  "Файл открыт в другой программе. Закройте его и повторите.")
             return
@@ -771,8 +729,6 @@ class App:
                 os.startfile(path)  # noqa: Windows only
             except Exception:
                 pass
-
-    # =============================================== реестры и журналы
 
     def registry_passes(self):
         self._build_registry(PASS_JOURNAL, PASS_REGISTRY, "Реестр_ТС_для_печати")
@@ -794,8 +750,7 @@ class App:
                 "Записи без срока",
                 f"У {len(unknown)} записей не указан или испорчен срок действия.\n\n"
                 "• «Да» — включить их в реестр отдельным блоком в конце.\n"
-                "• «Нет» — не включать.\n\n"
-                "Раньше такие записи молча попадали в число действующих."):
+                "• «Нет» — не включать."):
             unknown = []
         records = live + unknown
         today = datetime.now().strftime("%d.%m.%Y")
@@ -829,8 +784,6 @@ class App:
         open_journal_window(self.root, BADGE_JOURNAL,
                             "Журнал постоянных пропусков работников — ГЭТ СПб",
                             self.theme)
-
-    # =============================================== массовая печать
 
     def open_batch_passes(self):
         B.open_batch_dialog(
@@ -899,8 +852,6 @@ class App:
                     lambda: B.badge_pages(items), pages_total,
                     BADGE_JOURNAL, records,
                     f"Массовая_печать_бейджей_{len(items)}шт.pdf")
-
-    # =============================================== сервис
 
     def backup_database(self):
         path = filedialog.asksaveasfilename(

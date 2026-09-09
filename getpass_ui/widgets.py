@@ -8,8 +8,6 @@ from tkinter import ttk
 def make_scrollable(parent, bg_color):
     """Прокручиваемая область: рамка -> холст -> внутренняя рамка с формой."""
     wrapper = tk.Frame(parent, bg=bg_color)
-    # ВАЖНО: без этого wrapper остаётся неуправляемым (1x1, не отображён),
-    # и вся форма внутри холста не видна на экране
     wrapper.pack(fill="both", expand=True)
     canvas = tk.Canvas(wrapper, bg=bg_color, highlightthickness=0, bd=0)
     scroll = ttk.Scrollbar(wrapper, orient="vertical", command=canvas.yview)
@@ -20,8 +18,6 @@ def make_scrollable(parent, bg_color):
         canvas.configure(scrollregion=canvas.bbox("all"))
 
     def _on_canvas_resize(event):
-        # внутренняя рамка должна занимать всю ширину холста, иначе поля,
-        # разложенные через fill="x", схлопываются до собственной ширины
         canvas.itemconfigure(window_id, width=event.width)
         canvas.configure(scrollregion=canvas.bbox("all"))
 
@@ -42,8 +38,6 @@ class Debouncer:
         self._delay = default_delay
         self._job = None
         self._alive = True
-        # без этого отложенный вызов срабатывает уже после закрытия окна
-        # и Tk ругается «invalid command name»
         try:
             widget.bind("<Destroy>", self._on_destroy, add="+")
         except Exception:
@@ -84,12 +78,7 @@ class Debouncer:
 
 
 class ProgressDialog:
-    """Модальный индикатор с отменой, оформленный текущей темой.
-
-    Используется как контекстный менеджер: окно закрывается в любом случае,
-    в том числе при исключении. Раньше упавшая генерация оставляла модальное
-    окно с grab_set(), и программа блокировалась насмерть.
-    """
+    """Модальный индикатор с отменой, оформленный текущей темой."""
 
     def __init__(self, parent, theme, title, total, first_text="Подготовка..."):
         self.parent = parent
@@ -107,12 +96,12 @@ class ProgressDialog:
         self._bar = ttk.Progressbar(self.win, length=th.px(380), mode="determinate")
         self._bar.pack(pady=th.sp(1))
         ttk.Button(self.win, text="Отмена", command=self.cancel,
-                  style="Ghost.TButton").pack(pady=th.sp(2))
+                   style="Ghost.TButton").pack(pady=th.sp(2))
         try:
             self.win.grab_set()
         except Exception:
             pass
-        self.win.update()
+        self.win.update_idletasks()
 
     def __enter__(self):
         return self
@@ -134,11 +123,7 @@ class ProgressDialog:
         if text:
             self._label.config(text=text)
         try:
-            # update_idletasks вместо update(): перерисовка без повторного
-            # входа в обработчики, иначе клик по кнопке запускал вложенную
-            # генерацию поверх текущей
             self.win.update_idletasks()
-            self.win.update()
         except Exception:
             pass
 

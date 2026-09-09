@@ -1,9 +1,4 @@
-"""Форма одного пропуска на ТС — карточная компоновка (вариант В).
-
-Раньше каждая из двух вкладок раскладывалась в 12 отдельных глобальных
-переменных (p1_num, p1_plate_var, ... p2_...). Теперь это объект с методом
-data(), и функции печати больше не зависят от состояния интерфейса.
-"""
+"""Форма одного пропуска на ТС."""
 from __future__ import annotations
 
 import tkinter as tk
@@ -28,8 +23,7 @@ class PassForm:
         self.peer_getter = peer_getter
         self._zones_source = zones_source or (lambda: TERRITORIES)
         self._makes_source = makes_source or (lambda: [])
-        # родитель — ttk.Notebook, у него нет опции -bg; фон страницы всегда
-        # совпадает с фоном карточки, в которую вложен этот блок
+
         bg = theme.c("surface")
         self.frame = tk.Frame(parent, bg=bg)
         pad = tk.Frame(self.frame, bg=bg)
@@ -93,19 +87,25 @@ class PassForm:
         self.num.bind("<KeyRelease>", self.on_change, add="+")
 
     def refresh_suggestions(self):
-        """Перечитать списки автодополнения (зоны, марки) из актуальных данных."""
         try:
             self.territory.widget.configure(values=self._zones_source())
         except Exception:
             pass
 
-    # ------------------------------------------------------ поведение
-
     def _force_caps(self, *_args):
         val = self.plate_var.get()
         if val and val != val.upper():
+            try:
+                pos = self.plate.widget.index(tk.INSERT)
+            except Exception:
+                pos = None
             self.plate_var.set(val.upper())
-            return          # trace вызовется повторно — не дёргаем предпросмотр дважды
+            if pos is not None:
+                try:
+                    self.plate.widget.icursor(pos)
+                except Exception:
+                    pass
+            return
         self.plate.validate()
         self.on_change()
 
@@ -121,7 +121,6 @@ class PassForm:
                 self.color, self.d_pos, self.d_fio, self.d_phone]
 
     def autocomplete(self):
-        """Подставить данные машины из базы по госномеру."""
         car = lookup_car(self.plate_var.get())
         if not car:
             return
@@ -138,8 +137,6 @@ class PassForm:
             filled = True
         if filled:
             self.on_change()
-
-    # ---------------------------------------------------------- данные
 
     def data(self, placeholder=False):
         pos = self.d_pos.get().strip()
@@ -174,9 +171,9 @@ class PassForm:
                        self.d_pos, self.d_fio, self.d_phone):
             widget.delete(0, tk.END)
         self.territory.set(default_territory)
+        # Сброс подсветки ошибок, чтобы чистая форма не была красной
         for widget in self.entries():
-            widget.validate()
+            widget.reset_validation()
 
     def validate_required(self) -> bool:
-        """Подсветить незаполненные обязательные поля. True — форма годна."""
         return self.plate.validate()

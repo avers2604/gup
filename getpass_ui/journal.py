@@ -1,9 +1,4 @@
-"""Окно журнала. Одно на оба журнала — раньше это были две копии по 89 строк.
-
-Фильтры: текстовый поиск, статус, диапазон дат выдачи, а для полей, которые
-есть в конкретной схеме — зона допуска / подразделение (список фактических
-значений) и водитель / должность.
-"""
+"""Окно журнала выданных документов."""
 from __future__ import annotations
 
 import os
@@ -16,8 +11,8 @@ from getpass_core.storage import STATUS_REVOKED, FileBusy, export_records_to_xls
 
 from .components import Field, section_title
 from .theme import Theme
+from .widgets import make_scrollable
 
-#: какие поля схемы можно фильтровать дополнительно, и как их показывать
 _EXTRA_FILTERS = {
     "zone": ("combobox", "Зона допуска"),
     "park": ("combobox", "Подразделение"),
@@ -38,7 +33,7 @@ class JournalWindow:
         self.records = journal.read()
         self.sort_key = None
         self.sort_reverse = False
-        self._extra_widgets = {}   # key -> Field
+        self._extra_widgets = {}
 
         th = theme
         self.win = th.toplevel(parent, title)
@@ -50,8 +45,6 @@ class JournalWindow:
         self._build_tree()
         self._build_buttons()
         self.apply_filter()
-
-    # ------------------------------------------------------ разметка
 
     def _build_filters(self):
         th = self.theme
@@ -133,15 +126,13 @@ class JournalWindow:
                                font=th.font("caption"))
         self.status.pack(side="left")
         ttk.Button(bar, text="Изменить", command=self.edit_selected,
-                  style="Ghost.TButton").pack(side="left", padx=(th.sp(4), th.sp(2)))
+                   style="Ghost.TButton").pack(side="left", padx=(th.sp(4), th.sp(2)))
         ttk.Button(bar, text="Открыть в Excel", command=self.open_excel,
-                  style="Ghost.TButton").pack(side="right")
+                   style="Ghost.TButton").pack(side="right")
         ttk.Button(bar, text="Удалить", command=self.delete_selected,
-                  style="Danger.TButton").pack(side="right", padx=(0, th.sp(2)))
+                   style="Danger.TButton").pack(side="right", padx=(0, th.sp(2)))
         ttk.Button(bar, text="Аннулировать", command=self.revoke_selected,
-                  style="Ghost.TButton").pack(side="right", padx=(0, th.sp(2)))
-
-    # ------------------------------------------------------- выборка
+                   style="Ghost.TButton").pack(side="right", padx=(0, th.sp(2)))
 
     def _sort_by(self, key):
         if self.sort_key == key:
@@ -200,8 +191,6 @@ class JournalWindow:
             text=f"Показано: {shown} из {len(self.records)}   "
                  f"(журнал: {self.schema.name})")
 
-    #: цвет строки уже показывает срок — здесь дублируем это текстом,
-    #: чтобы состояние читалось и без цвета (печать, дальтонизм)
     _STATE_LABEL = {"expired": "просрочен", "unknown": "нет срока"}
 
     def _display(self, rec, key, state):
@@ -222,17 +211,13 @@ class JournalWindow:
         return list(self.tree.selection())
 
     def refresh_filter_sources(self):
-        """Перечитать списки значений для выпадающих фильтров."""
         for key, field in self._extra_widgets.items():
             if _EXTRA_FILTERS[key][0] == "combobox":
                 current = field.get()
                 field.widget.configure(values=[""] + self.journal.distinct(key))
                 field.set(current)
 
-    # ------------------------------------------------------ действия
-
     def _save(self, action, *args):
-        """Выполнить операцию журнала, показав внятную ошибку при занятом файле."""
         try:
             self.records = action(*args)
             self.refresh_filter_sources()
@@ -292,18 +277,20 @@ class JournalWindow:
         return False
 
     def open_excel(self):
-        """Журнал теперь хранится в SQLite, а не в XLSX — при нажатии
-        файл каждый раз пересобирается заново из текущих данных, чтобы
-        всегда открывался актуальный срез, а не устаревший снимок."""
         path = self.schema.xlsx_path
         try:
             rows = [[rec.get(k, "") for k in self.schema.keys] for rec in self.records]
             export_records_to_xlsx(rows, self.schema.cols_def, path, self.schema.name)
+        except (FileBusy, PermissionError):
+            messagebox.showerror("Файл занят",
+                                 "Файл журнала открыт в Excel или другой программе.\n"
+                                 "Закройте его и повторите попытку.", parent=self.win)
+            return
         except Exception as exc:
             messagebox.showerror("Ошибка", str(exc), parent=self.win)
             return
         try:
-            os.startfile(path)  # noqa: attribute defined only on Windows
+            os.startfile(path)  # noqa: Windows only
         except AttributeError:
             messagebox.showinfo("Файл журнала", path, parent=self.win)
         except Exception as exc:
@@ -312,27 +299,41 @@ class JournalWindow:
 
 
 class EditRecordDialog:
+    """Модальное окно редактирования записи с поддержкой прокрутки."""
+
     def __init__(self, parent, theme: Theme, schema, rec, on_save):
         self.rec = rec
         self.on_save = on_save
         th = theme
-        self.win = th.toplevel(parent, "Редактирование записи", resizable=(False, False))
+        self.win = th.toplevel(parent, "Редактирование записи", resizable=(True, True))
         self.win.grab_set()
-        pad = tk.Frame(self.win, bg=th.c("ground"))
-        pad.pack(fill="both", expand=True, padx=th.sp(4), pady=th.sp(4))
+
+        w = int(540 * th.scale)
+        h = int(min(640 * th.scale, self.win.winfo_screenheight() - 100))
+        self.win.geometry(f"{w}x{h}")
+        self.win.minsize(int(460 * th.scale), int(380 * th.scale))
+
+        btn_box = tk.Frame(self.win, bg=th.c("ground"))
+        btn_box.pack(side="bottom", fill="x", padx=th.sp(4), pady=th.sp(3))
+        ttk.Button(btn_box, text="Сохранить изменения", command=self._save,
+                   style="Primary.TButton").pack(fill="x")
+
+        _, _, inner = make_scrollable(self.win, th.c("ground"))
+        pad = tk.Frame(inner, bg=th.c("ground"))
+        pad.pack(fill="both", expand=True, padx=th.sp(4), pady=th.sp(3))
+
         self.entries = {}
         for f in schema.fields:
             if f.key == "id":
                 continue
-            entry = Field(pad, th, f.title, width=44)
+            entry = Field(pad, th, f.title, width=38)
             entry.pack(fill="x", pady=(0, th.sp(2)))
             entry.set(rec.get(f.key, ""))
             self.entries[f.key] = entry
+
         tk.Label(pad, text=f"ID записи: {rec.get('id','')}", bg=th.c("ground"),
                  fg=th.c("ink_faint"), font=th.font("caption")).pack(
-            anchor="w", pady=(th.sp(2), th.sp(3)))
-        ttk.Button(pad, text="Сохранить изменения", command=self._save,
-                  style="Primary.TButton").pack(fill="x")
+            anchor="w", pady=(th.sp(2), th.sp(2)))
 
     def _save(self):
         values = {k: e.get().strip() for k, e in self.entries.items()}

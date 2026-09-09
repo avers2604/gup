@@ -1,4 +1,4 @@
-"""Вкладка «Постоянный пропуск работника» — карточная компоновка (вариант В)."""
+"""Вкладка «Постоянный пропуск работника»."""
 from __future__ import annotations
 
 import os
@@ -10,9 +10,9 @@ from PIL import ImageTk
 
 from getpass_core import config, printing
 from getpass_core import render as R
-from getpass_core.dpi import scaled
 from getpass_core.domain import (add_years_safe, format_date, next_number,
                                  parse_date, split_fio)
+from getpass_core.dpi import scaled
 from getpass_core.storage import BADGE_JOURNAL, FileBusy
 
 from .components import AutocompleteEntry, Field, section_title
@@ -36,7 +36,7 @@ class BadgePanel:
         th = theme
         self.container = tk.Frame(notebook, bg=th.c("ground"))
         notebook.add(self.container, text="  Пропуск работника  ")
-        self.app = None          # проставляется владельцем для кнопок реестров
+        self.app = None
 
         self._build_buttons()
         self.paned = tk.PanedWindow(self.container, orient="horizontal", bg=th.c("ground"),
@@ -51,14 +51,11 @@ class BadgePanel:
         self._build_preview(paned)
 
     def bind_app(self, app):
-        """Связать кнопки, которым нужны действия уровня приложения."""
         self.app = app
         self._btn_batch.config(command=app.open_batch_badges)
         self._btn_registry.config(command=app.registry_badges)
         self._btn_journal.config(command=app.open_badge_journal)
         self._btn_export.config(command=app.export_badge_journal)
-
-    # ------------------------------------------------------- разметка
 
     def _build_buttons(self):
         th = self.theme
@@ -67,10 +64,10 @@ class BadgePanel:
         row1 = tk.Frame(bar, bg=th.c("ground"))
         row1.pack(fill="x", pady=(0, th.sp(2)))
         ttk.Button(row1, text="Сохранить PDF   (Ctrl+S)", command=self.generate_pdf,
-                  style="Primary.TButton").pack(side="left", fill="x", expand=True,
-                                                padx=(0, th.sp(2)))
+                   style="Primary.TButton").pack(side="left", fill="x", expand=True,
+                                                 padx=(0, th.sp(2)))
         ttk.Button(row1, text="Напечатать сразу   (Ctrl+P)", command=self.direct_print,
-                  style="Accent.TButton").pack(side="right", fill="x", expand=True)
+                   style="Accent.TButton").pack(side="right", fill="x", expand=True)
         row2 = tk.Frame(bar, bg=th.c("ground"))
         row2.pack(fill="x")
         self._btn_batch = ttk.Button(row2, text="Массовая печать", style="Ghost.TButton")
@@ -106,8 +103,6 @@ class BadgePanel:
         self.role.bind("<KeyRelease>", self.preview.schedule, add="+")
 
         self.sur_var, self.nam_var, self.pat_var = (tk.StringVar() for _ in range(3))
-        for var in (self.sur_var, self.nam_var, self.pat_var):
-            var.trace_add("write", self._make_upper(var))
         self.sur_field = Field(b, th, "Фамилия сотрудника", textvariable=self.sur_var,
                                required=True)
         self.sur_field.pack(fill="x", pady=(0, th.sp(3)))
@@ -116,6 +111,11 @@ class BadgePanel:
         self.nam_field.pack(fill="x", pady=(0, th.sp(3)))
         self.pat_field = Field(b, th, "Отчество сотрудника", textvariable=self.pat_var)
         self.pat_field.pack(fill="x", pady=(0, th.sp(3)))
+
+        self.sur_var.trace_add("write", self._make_upper(self.sur_var, self.sur_field))
+        self.nam_var.trace_add("write", self._make_upper(self.nam_var, self.nam_field))
+        self.pat_var.trace_add("write", self._make_upper(self.pat_var, self.pat_field))
+
         self.phone = Field(b, th, "Телефон (для базы и КПП)")
         self.phone.pack(fill="x")
         card.fit()
@@ -127,7 +127,7 @@ class BadgePanel:
         photo_row = tk.Frame(pb, bg=th.c("surface"))
         photo_row.pack(fill="x")
         ttk.Button(photo_row, text="Выбрать и обрезать (зум + сдвиг)",
-                  command=self.select_photo, style="Primary.TButton").pack(side="left")
+                   command=self.select_photo, style="Primary.TButton").pack(side="left")
         self.photo_status = tk.Label(photo_row, text="Фото не выбрано",
                                      bg=th.c("surface"), fg=th.c("danger"),
                                      font=th.font("caption"))
@@ -153,9 +153,9 @@ class BadgePanel:
         quick = tk.Frame(dt_row, bg=th.c("surface"))
         quick.pack(side="left", anchor="s", pady=(0, th.px(2)))
         ttk.Button(quick, text="+5 лет", command=lambda: self.set_years(5),
-                  style="Ghost.TButton").pack(side="left", padx=(0, th.sp(1)))
+                   style="Ghost.TButton").pack(side="left", padx=(0, th.sp(1)))
         ttk.Button(quick, text="+1 год", command=lambda: self.set_years(1),
-                  style="Ghost.TButton").pack(side="left")
+                   style="Ghost.TButton").pack(side="left")
         date_card.fit()
 
         fmt_card = Card(self.left_panel, th)
@@ -183,21 +183,27 @@ class BadgePanel:
                                       font=th.font("body"), text="Предпросмотр загружается...")
         self.preview_label.pack(fill="both", expand=True)
         tk.Label(b, text="Макет обновляется на лету при изменении любых полей.",
-                bg=th.c("surface"), fg=th.c("ink_faint"), font=th.font("caption")
-                ).pack(pady=(th.sp(2), 0))
+                 bg=th.c("surface"), fg=th.c("ink_faint"), font=th.font("caption")
+                 ).pack(pady=(th.sp(2), 0))
         self.panel.bind("<Configure>", lambda e: self.preview.schedule(delay=140))
 
-    # ------------------------------------------------------- поведение
-
     def _known_roles(self):
-        """Должности, уже встречавшиеся в журнале бейджей — для автодополнения."""
         return BADGE_JOURNAL.distinct("role")
 
-    def _make_upper(self, var):
+    def _make_upper(self, var, field=None):
         def callback(*_a):
             value = var.get()
             if value and value != value.upper():
+                try:
+                    pos = field.widget.index(tk.INSERT) if field else None
+                except Exception:
+                    pos = None
                 var.set(value.upper())
+                if pos is not None and field:
+                    try:
+                        field.widget.icursor(pos)
+                    except Exception:
+                        pass
                 return
             self.preview.schedule()
         return callback
@@ -220,17 +226,20 @@ class BadgePanel:
             return
         self.photo_status.config(text="Открыт редактор кадрирования...",
                                  fg=self.theme.c("accent_fill"))
-        open_crop_window(self.root, path, self._apply_crop, self.theme)
+        open_crop_window(self.root, path, self._apply_crop, self.theme,
+                         on_cancel=self._on_crop_cancel)
+
+    def _on_crop_cancel(self):
+        if not self.photo_path:
+            self.photo_status.config(text="Фото не выбрано", fg=self.theme.c("danger"))
+        else:
+            self.photo_status.config(text="Фото выбрано", fg=self.theme.c("success"))
 
     def _apply_crop(self, cropped, box):
-        # каждый кадр сохраняется отдельным файлом в архиве фотографий:
-        # общий временный файл затирался следующим сотрудником
         self.photo_path = store_photo(cropped, config.PHOTO_DIR, self.tab_num.get().strip())
         self.photo_status.config(text=f"Фото: {box[2]}×{box[3]} px (3:4)",
                                  fg=self.theme.c("success"))
         self.preview.schedule()
-
-    # ---------------------------------------------------------- данные
 
     def preview_data(self):
         sur = self.sur_var.get().strip() or "ФАМИЛИЯ"
@@ -253,7 +262,6 @@ class BadgePanel:
                 or format_date(add_years_safe(datetime.now(), 5))}
 
     def validate_required(self) -> bool:
-        """Подсветить незаполненные обязательные поля. True — форма годна."""
         ok = True
         for field in (self.role, self.sur_field, self.nam_field, self.issue, self.valid):
             ok = field.validate() and ok
@@ -264,7 +272,8 @@ class BadgePanel:
             messagebox.showwarning("Фото обязательно",
                                    "Выберите фотографию сотрудника и обрежьте её в редакторе!")
             return None
-        self.validate_required()
+        if not self.validate_required():
+            return None
         issue = parse_date(self.issue.get())
         if issue is None:
             messagebox.showwarning("Некорректная дата",
@@ -310,8 +319,6 @@ class BadgePanel:
             return (R.build_badge_a4_grid([badge] * 9),
                     f"Пропуска_{data['tab_num']}_9шт_А4")
         return R.build_badge_a4_single(badge), f"Пропуск_{data['tab_num']}_1шт_А4"
-
-    # --------------------------------------------------------- выпуск
 
     def _finish(self, data):
         record = dict(data)
@@ -378,8 +385,6 @@ class BadgePanel:
                 + "Считать бейдж выданным и записать в журнал?"):
             self._finish(data)
 
-    # ---------------------------------------------------------- прочее
-
     def collect_settings(self):
         try:
             paned_width = self.paned.sash_coord(0)[0]
@@ -405,7 +410,7 @@ class BadgePanel:
         self.valid.set(format_date(add_years_safe(today, 5)))
         self.photo_status.config(text="Фото не выбрано", fg=self.theme.c("danger"))
         for field in (self.role, self.sur_field, self.nam_field, self.issue, self.valid):
-            field.validate()
+            field.reset_validation()
         self.preview.schedule()
 
     def _render_preview(self):
