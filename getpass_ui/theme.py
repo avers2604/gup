@@ -248,6 +248,14 @@ class Theme:
         win.configure(bg=self.palette.ground)
         win.resizable(*resizable)
         win.transient(parent.winfo_toplevel() if hasattr(parent, "winfo_toplevel") else parent)
+        try:
+            # Необязательная интеграция: если модуль запущен внутри полного
+            # пакета programmы (а не скопирован отдельно), подгоняем цвет
+            # системного заголовка окна под тему.
+            from getpass_core.dpi import set_titlebar_theme
+            set_titlebar_theme(win, self.is_dark)
+        except ImportError:
+            pass
         return win
 
     def check(self, parent, text, variable, style="TCheckbutton", **kw):

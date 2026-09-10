@@ -15,7 +15,7 @@ from getpass_core import config, printing
 from getpass_core.domain import (add_months_safe, add_years_safe, format_date,
                                  next_number, parse_date)
 from getpass_core.dpi import (apply_scaling, enable_dpi_awareness, fit_to_screen,
-                              scaled)
+                              scaled, set_titlebar_theme)
 from getpass_core.fonts import fonts_are_missing, setup_ui_font, verify_ui_family
 from getpass_core.registry import BADGE_REGISTRY, PASS_REGISTRY, save_registry_pdf
 from getpass_core import render as R
@@ -62,6 +62,7 @@ class App:
 
         palette = self.settings.get("theme", "light")
         self.theme = Theme(self.root, palette, self.scale)
+        set_titlebar_theme(self.root, self.theme.is_dark)
         verify_ui_family(self.root)
         self.theme.apply_window(self.root)
 
