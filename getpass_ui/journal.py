@@ -6,6 +6,7 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox, simpledialog, ttk
 
+from getpass_core import blacklist
 from getpass_core.domain import parse_date
 from getpass_core.storage import STATUS_REVOKED, FileBusy, export_records_to_xlsx
 
@@ -257,8 +258,27 @@ class JournalWindow:
             parent=self.win)
         if reason is None:
             return
-        if self._save(self.journal.revoke_ids, ids, reason.strip() or "не указана"):
+        reason = reason.strip() or "не указана"
+        if self._save(self.journal.revoke_ids, ids, reason):
             self.apply_filter()
+            self._offer_blacklist(ids, reason)
+
+    def _offer_blacklist(self, ids, reason):
+        id_set = set(ids)
+        records = [r for r in self.records if r.get("id") in id_set]
+        if not records:
+            return
+        word = "запись" if len(records) == 1 else "записи"
+        if not messagebox.askyesno(
+                "Чёрный список",
+                f"Добавить аннулированн{'ую' if len(records) == 1 else 'ые'} "
+                f"{word} ({len(records)} шт.) в чёрный список нарушителей?",
+                parent=self.win):
+            return
+        for rec in records:
+            plate = rec.get("plate", "")
+            fio = rec.get("driver") or rec.get("fio") or ""
+            blacklist.add(plate, fio, reason)
 
     def edit_selected(self):
         ids = self._selected_ids()
