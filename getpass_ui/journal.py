@@ -12,6 +12,7 @@ from getpass_core.storage import STATUS_REVOKED, FileBusy, export_records_to_xls
 
 from .components import Field, section_title
 from .theme import Theme
+from .tokens import darken, lighten
 from .widgets import make_scrollable
 
 _EXTRA_FILTERS = {
@@ -117,6 +118,14 @@ class JournalWindow:
         self.tree.tag_configure("revoked", foreground=th.c("ink_faint"))
         self.tree.tag_configure("expired", foreground=th.c("danger"))
         self.tree.tag_configure("unknown", background=th.c("surface_alt"))
+        # Тонированная плашка вместо сплошного текста фирменным салатовым —
+        # у чистого success на светлом фоне недостаточный контраст для текста.
+        if th.is_dark:
+            self.tree.tag_configure("active", background=darken(th.c("success"), 0.82),
+                                    foreground=lighten(th.c("success"), 0.15))
+        else:
+            self.tree.tag_configure("active", background=lighten(th.c("success"), 0.82),
+                                    foreground=darken(th.c("success"), 0.55))
         self.tree.bind("<Double-1>", lambda e: self.edit_selected())
 
     def _build_buttons(self):
@@ -185,8 +194,7 @@ class JournalWindow:
             if skip:
                 continue
             values = [self._display(rec, f.key, state) for f in self.visible_fields]
-            self.tree.insert("", "end", iid=rec["id"], values=values,
-                             tags=(state,) if state != "active" else ())
+            self.tree.insert("", "end", iid=rec["id"], values=values, tags=(state,))
             shown += 1
         self.status.config(
             text=f"Показано: {shown} из {len(self.records)}   "

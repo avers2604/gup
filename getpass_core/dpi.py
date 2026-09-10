@@ -111,6 +111,34 @@ def scale_geometry(spec: str, scale: float) -> str:
         return spec
 
 
+def set_titlebar_theme(window, dark: bool) -> None:
+    """Тёмный/светлый системный заголовок окна (Windows 10 20H1+/11).
+
+    Без этого вызова рамка окна остаётся светлой независимо от темы
+    содержимого: Windows 11 скругляет углы окна средствами самой системы,
+    и за этими скруглениями виден светлый (системный) заголовок, даже
+    когда всё содержимое окна оформлено в тёмной теме.
+    """
+    if os.name != "nt":
+        return
+    try:
+        window.update_idletasks()
+        u32 = ctypes.windll.user32
+        u32.GetParent.argtypes = [wintypes.HWND]
+        u32.GetParent.restype = wintypes.HWND
+        hwnd = u32.GetParent(wintypes.HWND(window.winfo_id())) or window.winfo_id()
+        dwmapi = ctypes.windll.dwmapi
+        value = wintypes.BOOL(1 if dark else 0)
+        # DWMWA_USE_IMMERSIVE_DARK_MODE: 20 — Windows 10 20H1+/11,
+        # 19 — более ранние сборки Windows 10 с тем же API.
+        for attr in (20, 19):
+            dwmapi.DwmSetWindowAttribute(
+                wintypes.HWND(hwnd), wintypes.DWORD(attr),
+                ctypes.byref(value), ctypes.sizeof(value))
+    except Exception:
+        pass
+
+
 def fit_to_screen(root, width: int, height: int, margin: int = 80) -> tuple[int, int]:
     try:
         avail_w = root.winfo_screenwidth()
