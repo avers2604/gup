@@ -157,7 +157,7 @@ PALETTES = {"light": LIGHT, "dark": DARK}
 #: Шаг сетки — 4 px. Все отступы кратны ему.
 SPACE = (0, 4, 8, 12, 16, 20, 24, 32, 40, 48)
 
-RADIUS = {"field": 8, "button": 10, "card": 14, "chip": 999}
+RADIUS = {"field": 14, "button": 18, "card": 20, "chip": 999}
 
 #: Кегли в пунктах: Tk масштабирует их сам по tk scaling.
 TYPE = {

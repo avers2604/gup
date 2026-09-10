@@ -172,15 +172,32 @@ class App:
 
         ttk.Button(bar, text="Очистить форму", command=self.clear_current_form,
                    style="Danger.TButton").pack(side="right", padx=(th.sp(2), 0))
-        ttk.Button(bar, text="Восстановить", command=self.restore_database,
-                   style="Ghost.TButton").pack(side="right", padx=(th.sp(2), 0))
-        ttk.Button(bar, text="Бэкап", command=self.backup_database,
-                   style="Ghost.TButton").pack(side="right", padx=(th.sp(2), 0))
         ttk.Button(bar, text="Черный список", command=self.open_blacklist,
                style="Danger.TButton").pack(side="right", padx=(th.sp(2), 0))
         ttk.Button(bar, text="Тёмная тема" if not th.is_dark else "Светлая тема",
                    command=self.toggle_theme, style="Ghost.TButton"
                    ).pack(side="right")
+        # Резервное копирование теперь выполняется автоматически при
+        # закрытии программы (on_closing), поэтому ручные «Бэкап» и
+        # «Восстановить» убраны из основной панели в меню «Ещё», чтобы не
+        # загромождать её редко нужными действиями.
+        self._more_btn = ttk.Button(bar, text="⋯", width=3, command=self._open_more_menu,
+                                    style="Ghost.TButton")
+        self._more_btn.pack(side="right", padx=(th.sp(2), 0))
+
+    def _open_more_menu(self):
+        th = self.theme
+        menu = tk.Menu(self.root, tearoff=0, bg=th.c("surface"), fg=th.c("ink"),
+                       activebackground=th.c("accent_fill"), activeforeground="#FFFFFF",
+                       relief="flat", bd=0)
+        menu.add_command(label="Резервная копия", command=self.backup_database)
+        menu.add_command(label="Восстановить из копии", command=self.restore_database)
+        x = self._more_btn.winfo_rootx()
+        y = self._more_btn.winfo_rooty() + self._more_btn.winfo_height()
+        try:
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
 
     def toggle_theme(self):
         current = self.settings.get("theme", "light")
