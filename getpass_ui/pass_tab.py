@@ -159,14 +159,10 @@ class PassForm:
         self.num.insert(0, value)
 
     def restore(self, data):
-        self.set_number(data.get("num", self.get_number()))
-        self.plate_var.set(data.get("plate", ""))
-        for key in ("brand", "model", "type", "color", "d_pos", "d_fio"):
-            field = getattr(self, key)
-            field.delete(0, tk.END)
-            field.insert(0, data.get(key, ""))
-        self.d_phone.set(data.get("phone", ""))
-        self.territory.set(data.get("territory", ""))
+        # Legacy drafts used to repopulate both new vehicle passes on startup.
+        # Keep the method for compatibility with App, but intentionally ignore
+        # persisted vehicle-pass data. Badge draft restoration is unaffected.
+        return None
 
     def get_number(self):
         return self.num.get().strip()
