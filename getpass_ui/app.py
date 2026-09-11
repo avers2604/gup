@@ -855,64 +855,64 @@ class App:
                             f"Документ сформирован!\nСледующий номер: {next_num.value}")
 
     def _send_pass_to_printer(self, document, back_document, printer):
-    if back_document is not None:
+        if back_document is not None:
+            return run_task(
+                self.root,
+                lambda ask: printing.print_pass_two_sided(
+                    document, back_document, printer, confirm_flip=ask
+                ),
+                "Двусторонняя печать",
+                confirm=self._confirm_flip_for_back_side,
+            )
         return run_task(
             self.root,
-            lambda ask: printing.print_pass_two_sided(
-                document, back_document, printer, confirm_flip=ask
-            ),
-            "Двусторонняя печать",
-            confirm=self._confirm_flip_for_back_side,
+            lambda: printing.send_image_to_printer(document, printer),
+            "Печать",
         )
-    return run_task(
-        self.root,
-        lambda: printing.send_image_to_printer(document, printer),
-        "Печать",
-    )
 
-@staticmethod
-def _open_manual_print_copy(document, back_document, prefix):
-    temp_pdf = os.path.join(config.DATA_DIR, f"_print_{prefix}.pdf")
-    try:
-        if back_document is not None:
-            printing.save_pdf_pages([document, back_document], temp_pdf)
-        else:
-            printing.save_document(document, temp_pdf)
-        os.startfile(temp_pdf)  # noqa: Windows only
-        return True
-    except Exception:
-        return False
+    @staticmethod
+    def _open_manual_print_copy(document, back_document, prefix):
+        temp_pdf = os.path.join(config.DATA_DIR, f"_print_{prefix}.pdf")
+        try:
+            if back_document is not None:
+                printing.save_pdf_pages([document, back_document], temp_pdf)
+            else:
+                printing.save_document(document, temp_pdf)
+            os.startfile(temp_pdf)  # noqa: Windows only
+            return True
+        except Exception:
+            return False
 
-@staticmethod
-def _confirm_manual_issuance(err, opened):
-    opened_note = "Документ открыт — напечатайте вручную (Ctrl+P).\n\n" if opened else ""
-    return messagebox.askyesno(
-        "Принтер не ответил",
-        f"Не удалось напечатать напрямую.\n{err or ''}\n\n"
-        + opened_note
-        + "Считать пропуск выданным и записать в журнал?",
-    )
+    @staticmethod
+    def _confirm_manual_issuance(err, opened):
+        opened_note = "Документ открыт — напечатайте вручную (Ctrl+P).\n\n" if opened else ""
+        return messagebox.askyesno(
+            "Принтер не ответил",
+            f"Не удалось напечатать напрямую.\n{err or ''}\n\n"
+            + opened_note
+            + "Считать пропуск выданным и записать в журнал?",
+        )
 
-def direct_print_pass(self):
-    built = self.build_documents()
-    if not built:
-        return
-    document, back_document, prefix, records, next_num = built
-    printer = self.printer_var.get()
-    try:
-        self._issuance_id = issuance.prepare(PASS_JOURNAL, records, printer)
-    except Exception as exc:
-        messagebox.showerror("Выдача не начата", str(exc))
-        return
-    ok, err = self._send_pass_to_printer(document, back_document, printer)
-    if ok:
-        if not self._finish_pass(records, next_num):
+    def direct_print_pass(self):
+        built = self.build_documents()
+        if not built:
             return
-        messagebox.showinfo("Печать", "Документ успешно отправлен на принтер!")
-        return
-    opened = self._open_manual_print_copy(document, back_document, prefix)
-    if self._confirm_manual_issuance(err, opened):
-        self._finish_pass(records, next_num)
+        document, back_document, prefix, records, next_num = built
+        printer = self.printer_var.get()
+        try:
+            self._issuance_id = issuance.prepare(PASS_JOURNAL, records, printer)
+        except Exception as exc:
+            messagebox.showerror("Выдача не начата", str(exc))
+            return
+        ok, err = self._send_pass_to_printer(document, back_document, printer)
+        if ok:
+            if not self._finish_pass(records, next_num):
+                return
+            messagebox.showinfo("Печать", "Документ успешно отправлен на принтер!")
+            return
+        opened = self._open_manual_print_copy(document, back_document, prefix)
+        if self._confirm_manual_issuance(err, opened):
+            self._finish_pass(records, next_num)
 
     def _confirm_flip_for_back_side(self) -> bool:
         return messagebox.askokcancel(
