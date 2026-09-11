@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
 
@@ -54,7 +58,7 @@ jobs:
 
     - name: Test with pytest
       run: |
-        xvfb-run -a --server-args="-screen 0 1920x1200x24" python -m pytest --cov --cov-report=xml -v
+        xvfb-run -a --server-args="-screen 0 1920x1200x24" python -m pytest --cov --cov-fail-under=60 --cov-report=xml -v
     - name: Dependency audit
       run: python -m pip_audit -r requirements.txt
     - name: Security analysis

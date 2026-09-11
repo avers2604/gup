@@ -6,10 +6,14 @@ import getpass
 import json
 import os
 import re
+import shutil
 import sqlite3
+import tempfile
+import threading
 import uuid
 import xml.sax.saxutils as saxutils
 import zipfile
+from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -18,6 +22,7 @@ from .domain import DATE_FMT, get_excel_col_letter, parse_date, plate_key
 
 STATUS_ACTIVE = "действует"
 STATUS_REVOKED = "аннулирован"
+SCHEMA_VERSION = 2
 
 _XML_ILLEGAL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
@@ -203,9 +208,24 @@ class Journal:
 
     def __init__(self, schema: JournalSchema):
         self.schema = schema
+        self._snapshot_lock = threading.Lock()
 
     def _connect(self) -> sqlite3.Connection:
         os.makedirs(os.path.dirname(config.DB_FILE) or ".", exist_ok=True)
+        try:
+            conn = self._connect_once()
+        except sqlite3.DatabaseError as exc:
+            snapshot = config.DB_FILE + ".healthy"
+            if not os.path.exists(snapshot):
+                raise FileBusy(config.DB_FILE) from exc
+            try:
+                shutil.copy2(snapshot, config.DB_FILE)
+                conn = self._connect_once()
+            except (OSError, sqlite3.DatabaseError) as recovery_error:
+                raise FileBusy(config.DB_FILE) from recovery_error
+        return conn
+
+    def _connect_once(self) -> sqlite3.Connection:
         try:
             conn = sqlite3.connect(config.DB_FILE, timeout=10)
         except sqlite3.OperationalError as exc:
@@ -217,7 +237,26 @@ class Journal:
         conn.execute("PRAGMA busy_timeout = 10000")
 
         self._ensure_table(conn)
+        self._save_healthy_snapshot(conn)
         return conn
+
+    def _save_healthy_snapshot(self, conn: sqlite3.Connection) -> None:
+        """Сохранить последнюю проверенную копию для автоматического восстановления."""
+        with self._snapshot_lock:
+            snapshot = config.DB_FILE + ".healthy"
+            fd, temporary = tempfile.mkstemp(prefix="gup_healthy_", suffix=".sqlite3")
+            os.close(fd)
+            try:
+                with closing(sqlite3.connect(temporary)) as target:
+                    conn.backup(target)
+                    target.commit()
+                os.replace(temporary, snapshot)
+            finally:
+                if os.path.exists(temporary):
+                    try:
+                        os.remove(temporary)
+                    except OSError:
+                        pass
 
     def _ensure_table(self, conn: sqlite3.Connection) -> None:
         table = self.schema.table
@@ -256,7 +295,20 @@ class Journal:
             if key:
                 conn.execute(f'CREATE INDEX IF NOT EXISTS "{self.schema.table}_{key}" '
                              f'ON "{self.schema.table}" ("{key}")')
-        conn.execute("PRAGMA user_version = 1")
+        self._migrate_schema(conn)
+
+    def _migrate_schema(self, conn: sqlite3.Connection) -> None:
+        """Применить явные миграции SQLite последовательно и идемпотентно."""
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
+        current = int(conn.execute("PRAGMA user_version").fetchone()[0])
+        migrations = {
+            1: "initial journal and audit tables",
+            2: "indexes and immutable audit history",
+        }
+        for version in range(current + 1, SCHEMA_VERSION + 1):
+            conn.execute("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                         (version, datetime.now().astimezone().isoformat()))
+            conn.execute(f"PRAGMA user_version = {version}")
 
     def _event(self, conn, action, before, after):
         conn.execute("INSERT INTO journal_events (journal, record_id, action, actor, "
