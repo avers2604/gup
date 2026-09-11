@@ -3,7 +3,7 @@ import json
 import os
 import sqlite3
 import zipfile
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timedelta
 
 import pytest
@@ -102,12 +102,13 @@ def test_restore_remaps_badge_photo_path_inside_database(tmp_path, data_dir):
     from getpass_core import config
 
     source_db = tmp_path / "source.sqlite3"
-    with sqlite3.connect(source_db) as conn:
+    with closing(sqlite3.connect(source_db)) as conn:
         conn.execute("CREATE TABLE badge_journal (id TEXT PRIMARY KEY, photo_path TEXT)")
         conn.execute(
             "INSERT INTO badge_journal (id, photo_path) VALUES (?, ?)",
             ("badge-1", r"C:\\Old\\Photos\\ivanov.jpg"),
         )
+        conn.commit()
 
     photo = b"JPG"
     archive = tmp_path / "db-restore.zip"
@@ -129,7 +130,7 @@ def test_restore_remaps_badge_photo_path_inside_database(tmp_path, data_dir):
 
     assert restored == 2
     assert "checksums.json" in skipped
-    with sqlite3.connect(config.DB_FILE) as conn:
+    with closing(sqlite3.connect(config.DB_FILE)) as conn:
         stored = conn.execute(
             "SELECT photo_path FROM badge_journal WHERE id='badge-1'"
         ).fetchone()[0]
