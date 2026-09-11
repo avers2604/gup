@@ -17,10 +17,80 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: codex/reliability-hardening
-      - name: Apply patch and remove one-shot files
+      - name: Apply exact replacements and remove one-shot files
         run: |
-          git apply --check .github/reliability-fixes.patch
-          git apply .github/reliability-fixes.patch
+          python - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              "getpass_core/storage.py": [(
+                  '''    def delete_ids(self, ids) -> list[dict]:
+                  id_set = set(ids)
+                  current = [r for r in self.read() if r.get("id") not in id_set]
+                  self.write(current)
+                  return current
+          ''',
+                  '''    def delete_ids(self, ids) -> list[dict]:
+                  id_set = set(ids)
+                  if not id_set:
+                      return self.read()
+                  conn = self._connect()
+                  try:
+                      with conn:
+                          conn.execute("BEGIN IMMEDIATE")
+                          placeholders = ", ".join("?" for _ in id_set)
+                          conn.execute(
+                              f'DELETE FROM "{self.schema.table}" '
+                              f'WHERE id IN ({placeholders})',
+                              tuple(id_set),
+                          )
+                  except sqlite3.OperationalError as exc:
+                      raise FileBusy(config.DB_FILE) from exc
+                  finally:
+                      conn.close()
+                  return self.read()
+          ''')],
+              "getpass_ui/app.py": [
+                  (
+                      '''        try:
+                      accepted, skipped = getpass_core.backup.inspect_backup(path, password=password)
+                  except Exception as exc:
+          ''',
+                      '''        try:
+                      accepted, skipped = run_task(
+                          self.root,
+                          lambda: getpass_core.backup.inspect_backup(path, password=password),
+                          "Проверка резервной копии",
+                      )
+                  except Exception as exc:
+          '''),
+                  (
+                      '''        try:
+                      restored, _ = getpass_core.backup.restore_backup(path, password=password)
+                  except Exception as exc:
+          ''',
+                      '''        try:
+                      restored, _ = run_task(
+                          self.root,
+                          lambda: getpass_core.backup.restore_backup(path, password=password),
+                          "Восстановление данных",
+                      )
+                  except Exception as exc:
+          '''),
+              ],
+          }
+
+          for filename, changes in replacements.items():
+              path = Path(filename)
+              text = path.read_text(encoding="utf-8")
+              for old, new in changes:
+                  if text.count(old) != 1:
+                      raise SystemExit(
+                          f"expected exactly one match in {filename}, got {text.count(old)}"
+                      )
+                  text = text.replace(old, new, 1)
+              path.write_text(text, encoding="utf-8")
+          PY
           git rm .github/reliability-fixes.patch .github/workflows/apply-reliability-fixes.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
