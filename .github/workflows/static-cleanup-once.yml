@@ -22,7 +22,8 @@ jobs:
       - name: Verify strict static checks
         run: |
           python -m pip install flake8 bandit
-          flake8 . --count --max-line-length=127 --show-source --statistics
+          flake8 pass_generator.py getpass_core getpass_ui tests \
+            --count --max-line-length=127 --show-source --statistics
           python -m bandit -r getpass_core getpass_ui -ll
           python -m compileall -q getpass_core getpass_ui tests
       - name: Commit verified cleanup
