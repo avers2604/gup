@@ -136,6 +136,12 @@ def test_single_pass_save_failure_cancels_prepared_operation(
         ),
         _finish_pass=lambda *_args: True,
     )
+    fake._save_pass_file = lambda document, back_document, path: (
+        app_module.App._save_pass_file(fake, document, back_document, path)
+    )
+    fake._report_pass_save_failure = lambda operation_id, exc: (
+        app_module.App._report_pass_save_failure(fake, operation_id, exc)
+    )
     monkeypatch.setattr(app_module, "PASS_JOURNAL", journal)
     monkeypatch.setattr(
         filedialog, "asksaveasfilename", lambda *args, **kwargs: str(output)
