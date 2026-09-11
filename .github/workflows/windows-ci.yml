@@ -66,13 +66,14 @@ jobs:
       - name: Build Inno Setup installer
         shell: pwsh
         run: |
-          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-          if (-not $iscc) {
-            $candidate = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-            if (-not (Test-Path $candidate)) { throw 'ISCC.exe not found' }
-            $iscc = Get-Item $candidate
+          $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if ($command) {
+            $isccPath = $command.Source
+          } else {
+            $isccPath = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
           }
-          & $iscc.Source 'installer\GET-Passes.iss'
+          if (-not (Test-Path $isccPath)) { throw 'ISCC.exe not found' }
+          & $isccPath 'installer\GET-Passes.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Inno Setup build failed' }
           if (-not (Test-Path 'dist\installer\GET-Passes-Setup.exe')) {
             throw 'GET-Passes-Setup.exe not found'
