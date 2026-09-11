@@ -125,16 +125,12 @@ class PassForm:
         if not car:
             return
         filled = False
-        pairs = ((self.brand, "brand"), (self.model, "model"), (self.type, "type"),
-                 (self.color, "color"), (self.d_pos, "d_pos"), (self.d_fio, "d_fio"),
-                 (self.d_phone, "d_phone"))
+        pairs = ((self.brand, "brand"), (self.model, "model"),
+                 (self.type, "type"), (self.color, "color"))
         for widget, key in pairs:
             if not widget.get().strip() and car.get(key):
                 widget.insert(0, car[key])
                 filled = True
-        if not self.territory.get().strip() and car.get("territory"):
-            self.territory.set(car["territory"])
-            filled = True
         if filled:
             self.on_change()
 
