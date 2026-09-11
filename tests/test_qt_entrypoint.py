@@ -20,20 +20,27 @@ class _SelfTestPreview:
         self.has_image = image is not None
 
 
-class _SelfTestPlate:
-    def __init__(self, events):
+class _SelfTestField:
+    def __init__(self, events, name):
         self._events = events
+        self._name = name
 
     def setText(self, value):
-        self._events.append(("plate", value))
+        self._events.append((self._name, value))
 
 
 class _SelfTestVehiclePage:
     def __init__(self, events):
         self.preview = _SelfTestPreview(events)
         self.pass_fields = {
-            "first": {"plate": _SelfTestPlate(events)},
+            "first": {"plate": _SelfTestField(events, "plate")},
         }
+
+
+class _SelfTestEmployeePage:
+    def __init__(self, events):
+        self.preview = _SelfTestPreview(events)
+        self.surname_edit = _SelfTestField(events, "surname")
 
 
 class _SelfTestSidebar:
@@ -49,11 +56,17 @@ class _SelfTestSidebar:
 class _SelfTestWindow:
     events = []
 
-    def __init__(self, theme_manager, vehicle_viewmodel):
+    def __init__(
+        self,
+        theme_manager,
+        vehicle_viewmodel,
+        employee_badge_viewmodel,
+    ):
         self.active_route = "dashboard"
         self.stack = _SelfTestStack()
         self.sidebar = _SelfTestSidebar(self, self.events)
         self.vehicle_page = _SelfTestVehiclePage(self.events)
+        self.employee_page = _SelfTestEmployeePage(self.events)
 
     @staticmethod
     def show():
@@ -69,13 +82,16 @@ def test_qt_self_test_returns_zero(monkeypatch):
     assert main(["--self-test"]) == 0
 
 
-def test_qt_self_test_exercises_debounced_vehicle_binding(monkeypatch):
+def test_qt_self_test_exercises_vehicle_and_employee_previews(monkeypatch):
     events = []
     _SelfTestWindow.events = events
 
     def fake_wait_for_preview_refresh(window, app):
         events.append(("wait", 250))
-        window.vehicle_page.preview.has_image = True
+        if window.active_route == "vehicle":
+            window.vehicle_page.preview.has_image = True
+        elif window.active_route == "employee":
+            window.employee_page.preview.has_image = True
 
     monkeypatch.setattr(qt_app, "MainWindow", _SelfTestWindow)
     monkeypatch.setattr(
@@ -90,6 +106,10 @@ def test_qt_self_test_exercises_debounced_vehicle_binding(monkeypatch):
         ("route", "vehicle"),
         ("preview", None),
         ("plate", "А111АА78"),
+        ("wait", 250),
+        ("route", "employee"),
+        ("preview", None),
+        ("surname", "ИВАНОВ"),
         ("wait", 250),
     ]
 
