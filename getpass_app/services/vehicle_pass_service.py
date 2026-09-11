@@ -33,6 +33,7 @@ class VehiclePassService:
         lookup=lookup_car,
         zone_values=None,
         brand_values=known_car_brands,
+        printer_values=printing.get_available_printers,
         render=R.render_pass,
         render_back=R.render_pass_back,
         build_a4=R.build_pass_a4_sheet,
@@ -49,6 +50,7 @@ class VehiclePassService:
         self._lookup = lookup
         self._zone_values = zone_values or (lambda: PASS_JOURNAL.distinct("zone"))
         self._brand_values = brand_values
+        self._printer_values = printer_values
         self._render = render
         self._render_back = render_back
         self._build_a4 = build_a4
@@ -81,6 +83,9 @@ class VehiclePassService:
 
     def brands(self) -> tuple[str, ...]:
         return tuple(self._brand_values())
+
+    def printers(self) -> tuple[str, ...]:
+        return tuple(self._printer_values())
 
     def render_preview(
         self,
