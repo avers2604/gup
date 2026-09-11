@@ -5,8 +5,10 @@ from PySide6.QtCore import Qt
 from getpass_app.services.settings_service import SettingsService
 from getpass_qt.main_window import MainWindow
 from getpass_qt.theme.manager import ThemeManager
+from getpass_qt.viewmodels.employee_badge_viewmodel import EmployeeBadgeViewModel
 from getpass_qt.viewmodels.main_viewmodel import MainViewModel
 from getpass_qt.viewmodels.vehicle_pass_viewmodel import VehiclePassViewModel
+from getpass_qt.views.employee_badge import EmployeeBadgePage
 from getpass_qt.views.vehicle_pass import VehiclePassPage
 
 
@@ -31,6 +33,29 @@ class FakeNavigationVehicleService:
 
     def printers(self):
         return ("По умолчанию",)
+
+
+class FakeNavigationEmployeeService:
+    def roles(self):
+        return ("ВОДИТЕЛЬ",)
+
+    def printers(self):
+        return ("По умолчанию",)
+
+    def render_preview(self, data):
+        return Image.new("RGB", (340, 216), "white")
+
+    def warnings(self, state):
+        raise AssertionError("navigation test must not query output warnings")
+
+    def store_photo(self, image, tab_num):
+        raise AssertionError("navigation test must not store photos")
+
+    def save_pdf(self, state, path):
+        raise AssertionError("navigation test must not save")
+
+    def print_badge(self, state, printer):
+        raise AssertionError("navigation test must not print")
 
 
 def test_main_viewmodel_defaults_to_dashboard(qtbot):
@@ -60,9 +85,11 @@ def _window(qapp):
     manager = ThemeManager(qapp, service)
     manager.load()
     vehicle_vm = VehiclePassViewModel(FakeNavigationVehicleService())
+    employee_vm = EmployeeBadgeViewModel(FakeNavigationEmployeeService())
     return MainWindow(
         theme_manager=manager,
         vehicle_viewmodel=vehicle_vm,
+        employee_badge_viewmodel=employee_vm,
     )
 
 
@@ -73,6 +100,7 @@ def test_main_window_has_variant_a_sidebar_and_stack(qapp, qtbot):
     assert window.stack.count() == 8
     assert window.active_route == "dashboard"
     assert isinstance(window.vehicle_page, VehiclePassPage)
+    assert isinstance(window.employee_page, EmployeeBadgePage)
 
 
 def test_sidebar_switches_to_vehicle_page(qapp, qtbot):
@@ -81,6 +109,16 @@ def test_sidebar_switches_to_vehicle_page(qapp, qtbot):
     window.sidebar.request_route("vehicle")
     assert window.active_route == "vehicle"
     assert window.stack.currentWidget() is window.vehicle_page
+
+
+def test_employee_route_uses_real_employee_badge_page(qapp, qtbot):
+    window = _window(qapp)
+    qtbot.addWidget(window)
+
+    window.sidebar.request_route("employee")
+
+    assert window.active_route == "employee"
+    assert window.stack.currentWidget() is window.employee_page
 
 
 def test_dashboard_primary_action_navigates_to_vehicle(qapp, qtbot):
