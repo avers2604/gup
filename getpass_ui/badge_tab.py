@@ -304,7 +304,7 @@ class BadgePanel:
         if dups and not messagebox.askyesno(
                 "Табельный номер уже выдан",
                 f"На табельный № {tab_num} уже есть действующий пропуск:\n"
-                + "\n".join(f"  • {d.get('fio','')} — до {d.get('valid_until','')}"
+                + "\n".join(f"  • {d.get('fio', '')} — до {d.get('valid_until', '')}"
                             for d in dups[:5])
                 + "\n\nВыдать ещё один?"):
             return None

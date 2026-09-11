@@ -47,6 +47,7 @@ def test_confirm_is_idempotent(journal):
 def test_failed_pdf_preserves_existing_file(tmp_path):
     target = tmp_path / "report.pdf"
     target.write_bytes(b"original")
+
     def pages():
         yield Image.new("RGB", (10, 10))
         raise RuntimeError("cancel")

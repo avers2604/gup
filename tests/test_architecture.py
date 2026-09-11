@@ -39,6 +39,7 @@ def test_navigation_extension_without_app_change():
     nav = Navigation()
     called = []
     nav.register(Section("new", "Новый раздел", lambda: called.append(True)))
+
     class Menu:
         def add_command(self, **kwargs):
             kwargs["command"]()
@@ -60,11 +61,13 @@ def test_task_keeps_confirmation_on_ui_thread():
         def work(ask):
             assert threading.get_ident() != ui_thread
             return ask()
+
         def confirm():
             confirmations.append(threading.get_ident())
             return True
         assert run_task(root, work, confirm=confirm)
         assert confirmations == [ui_thread]
+
         def fail():
             raise ValueError("worker error")
         with pytest.raises(ValueError, match="worker error"):

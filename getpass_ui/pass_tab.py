@@ -65,7 +65,7 @@ class PassForm:
         self.color.pack(side="left", fill="x", expand=True)
 
         section_title(pad, theme, "Водитель").pack(anchor="w",
-                                                    pady=(theme.sp(4), theme.sp(2)))
+                                                   pady=(theme.sp(4), theme.sp(2)))
         self.d_pos = Field(pad, theme, "Должность")
         self.d_pos.pack(fill="x", pady=(0, theme.sp(3)))
         row3 = hbox(pad, theme)
