@@ -1,0 +1,32 @@
+name: Fix app indentation once
+
+on:
+  push:
+    branches: ["codex/reduce-c901"]
+    paths:
+      - ".github/fix_app_indent_once.py"
+      - ".github/workflows/fix-app-indent-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: codex/reduce-c901
+      - name: Apply exact repair
+        run: |
+          python .github/fix_app_indent_once.py
+          python -m py_compile getpass_ui/app.py
+      - name: Commit repair and remove one-shot tooling
+        run: |
+          git rm .github/fix_app_indent_once.py .github/workflows/fix-app-indent-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add getpass_ui/app.py
+          git commit -m "fix: restore app helper indentation"
+          git push origin HEAD:codex/reduce-c901
