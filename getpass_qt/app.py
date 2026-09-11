@@ -31,6 +31,20 @@ def _vehicle_viewmodel(*, self_test: bool) -> VehiclePassViewModel:
     return VehiclePassViewModel(service)
 
 
+def _exercise_self_test(window, app) -> None:
+    assert window.active_route == "dashboard"
+    assert window.stack.count() == 8
+
+    window.sidebar.request_route("vehicle")
+    app.processEvents()
+    assert window.active_route == "vehicle"
+
+    plate = window.vehicle_page.pass_fields["first"]["plate"]
+    plate.setText("А111АА78")
+    app.processEvents()
+    assert window.vehicle_page.preview.has_image
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.self_test:
@@ -55,8 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_test:
         window.show()
         app.processEvents()
-        assert window.active_route == "dashboard"
-        assert window.stack.count() == 8
+        _exercise_self_test(window, app)
         window.close()
         app.processEvents()
         return 0
