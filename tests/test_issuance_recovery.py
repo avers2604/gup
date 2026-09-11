@@ -150,6 +150,7 @@ def test_single_pass_save_failure_cancels_prepared_operation(
     app_module.App.generate_pass(fake)
 
     assert issuance.pending(journal) == []
+    assert fake._issuance_id is None
 
 
 def test_badge_save_failure_cancels_prepared_operation(data_dir, monkeypatch, tmp_path):
@@ -180,3 +181,4 @@ def test_badge_save_failure_cancels_prepared_operation(data_dir, monkeypatch, tm
     badge_module.BadgePanel.generate_pdf(fake)
 
     assert issuance.pending(badge_journal) == []
+    assert fake._issuance_id is None
