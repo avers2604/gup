@@ -81,3 +81,34 @@ def test_stable_release_workflow_requires_matching_v_tag_and_builds_installer():
     assert "GET-Passes-Setup.exe" in workflow
     assert "softprops/action-gh-release" in workflow
     assert "prerelease: false" in workflow
+
+
+def test_python_ci_covers_qt_and_application_packages():
+    workflow = (ROOT / ".github" / "workflows" / "python-app.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "QT_QPA_PLATFORM: offscreen" in workflow
+    assert "getpass_app" in workflow
+    assert "getpass_design" in workflow
+    assert "getpass_qt" in workflow
+
+
+def test_windows_ci_smokes_qt_source_and_preview_exe():
+    workflow = (ROOT / ".github" / "workflows" / "windows-ci.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "python -m getpass_qt --self-test" in workflow
+    assert "GET-Passes-Qt-Preview" in workflow
+    assert (
+        "getpass_qt\\__main__.py" in workflow
+        or "getpass_qt/__main__.py" in workflow
+    )
+
+
+def test_phase1_production_workflows_still_build_pass_generator():
+    for name in ("build-exe.yml", "release.yml"):
+        workflow = (ROOT / ".github" / "workflows" / name).read_text(
+            encoding="utf-8"
+        )
+        assert "pass_generator.py" in workflow
+        assert "GET-Passes-Qt-Preview" not in workflow
