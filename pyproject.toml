@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [tool.coverage.run]
-source = ["getpass_core", "getpass_ui"]
+source = ["getpass_core", "getpass_ui", "getpass_app", "getpass_design", "getpass_qt"]
 
 [tool.coverage.report]
 show_missing = true
