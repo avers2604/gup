@@ -20,6 +20,8 @@ PROTECTED_DIRS = (
 
 def _git_blob_sha(path: Path) -> str:
     data = path.read_bytes()
+    if path.suffix == ".py":
+        data = data.replace(b"\r\n", b"\n")
     header = f"blob {len(data)}\0".encode("ascii")
     return hashlib.sha1(header + data).hexdigest()
 
