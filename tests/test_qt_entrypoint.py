@@ -18,21 +18,23 @@ def test_qt_self_test_exercises_vehicle_route_and_binding(monkeypatch):
             return 8
 
     class FakePreview:
-        has_image = False
+        def __init__(self):
+            self.has_image = True
+
+        def set_pil_image(self, image):
+            events.append(("preview", image))
+            self.has_image = image is not None
 
     class FakePlate:
-        def __init__(self, window):
-            self._window = window
-
-        def setText(self, value):
+        @staticmethod
+        def setText(value):
             events.append(("plate", value))
-            self._window.vehicle_page.preview.has_image = True
 
     class FakeVehiclePage:
-        def __init__(self, window):
+        def __init__(self):
             self.preview = FakePreview()
             self.pass_fields = {
-                "first": {"plate": FakePlate(window)},
+                "first": {"plate": FakePlate()},
             }
 
     class FakeSidebar:
@@ -48,7 +50,7 @@ def test_qt_self_test_exercises_vehicle_route_and_binding(monkeypatch):
             self.active_route = "dashboard"
             self.stack = FakeStack()
             self.sidebar = FakeSidebar(self)
-            self.vehicle_page = FakeVehiclePage(self)
+            self.vehicle_page = FakeVehiclePage()
 
         @staticmethod
         def show():
@@ -58,13 +60,24 @@ def test_qt_self_test_exercises_vehicle_route_and_binding(monkeypatch):
         def close():
             pass
 
+    def fake_wait_for_preview_refresh(window, app):
+        events.append(("wait", 250))
+        window.vehicle_page.preview.has_image = True
+
     monkeypatch.setattr(qt_app, "MainWindow", FakeWindow)
+    monkeypatch.setattr(
+        qt_app,
+        "_wait_for_preview_refresh",
+        fake_wait_for_preview_refresh,
+    )
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
 
     assert main(["--self-test"]) == 0
     assert events == [
         ("route", "vehicle"),
+        ("preview", None),
         ("plate", "А111АА78"),
+        ("wait", 250),
     ]
 
 
