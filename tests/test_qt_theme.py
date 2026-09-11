@@ -16,6 +16,19 @@ def test_dark_stylesheet_uses_dark_palette():
         assert value in css
 
 
+def test_vehicle_workspace_styles_use_semantic_tokens_and_states():
+    css = build_stylesheet("light")
+
+    assert 'QLineEdit[invalid="true"]' in css
+    assert LIGHT.danger in css
+    assert LIGHT.focus in css
+    assert "QTabWidget#PassSlotTabs" in css
+    assert "QFrame#PrintSettings" in css
+    assert "QWidget#VehiclePreview" in css
+    assert "QPushButton#PrintButton" in css
+    assert "QPushButton#SavePdfButton" in css
+
+
 def test_theme_manager_persists_toggle(qapp):
     saved = []
     service = SettingsService(
