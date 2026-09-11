@@ -5,7 +5,7 @@ name: Python application
 
 on:
   push:
-    branches: [ "main", "codex/reduce-c901" ]
+    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 
@@ -50,12 +50,12 @@ jobs:
 
     - name: Lint with flake8
       run: |
-        # Ошибки pycodestyle/pyflakes теперь блокируют сборку.
+        # Ошибки pycodestyle/pyflakes блокируют сборку.
         flake8 pass_generator.py getpass_core getpass_ui tests \
           --count --max-line-length=127 --show-source --statistics
-        # Сложность пока остаётся видимой метрикой и не блокирует релиз.
+        # Цикломатическая сложность выше 10 тоже блокирует сборку.
         flake8 pass_generator.py getpass_core getpass_ui tests \
-          --count --exit-zero --select=C901 --max-complexity=10 --statistics
+          --count --select=C901 --max-complexity=10 --statistics
 
     - name: Test with pytest
       run: |
