@@ -50,11 +50,12 @@ jobs:
 
     - name: Lint with flake8
       run: |
-        # синтаксические ошибки и обращения к неопределённым именам —
-        # ровно тот класс, которым программа падала с NameError
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # остальное — предупреждениями, сборку не роняет
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        # Ошибки pycodestyle/pyflakes теперь блокируют сборку.
+        flake8 pass_generator.py getpass_core getpass_ui tests \
+          --count --max-line-length=127 --show-source --statistics
+        # Сложность пока остаётся видимой метрикой и не блокирует релиз.
+        flake8 pass_generator.py getpass_core getpass_ui tests \
+          --count --exit-zero --select=C901 --max-complexity=10 --statistics
 
     - name: Test with pytest
       run: |
