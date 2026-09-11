@@ -223,7 +223,8 @@ def test_window_geometry_and_active_tab_persist_across_restart(app, monkeypatch)
         second.root.update()
         assert second.notebook.index(second.notebook.select()) == 1
         width, height = (int(v) for v in second.root.geometry().split("+")[0].split("x"))
-        assert (width, height) == actual_size
+        from getpass_core.dpi import fit_to_screen
+        assert (width, height) == fit_to_screen(second.root, *actual_size)
     finally:
         second.root.destroy()
 

@@ -1,6 +1,8 @@
 """Вкладка «Постоянный пропуск работника»."""
 from __future__ import annotations
 
+from .tasks import run_task
+
 import os
 import tkinter as tk
 from datetime import datetime
@@ -401,7 +403,7 @@ class BadgePanel:
         except Exception as exc:
             messagebox.showerror("Выдача не начата", str(exc))
             return
-        ok, err = printing.send_image_to_printer(document, printer)
+        ok, err = run_task(self.root, lambda: printing.send_image_to_printer(document, printer), "Печать бейджа")
         if ok:
             if self._finish(data) is None:
                 return
