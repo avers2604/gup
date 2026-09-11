@@ -137,7 +137,7 @@ def build_pass_blank() -> Image.Image:
     for x0, x1, caption in ((95, 784, "Должность"), (829, 1525, "Подпись"),
                             (1570, 2265, "Расшифровка")):
         draw.line([(x0, 1432), (x1, 1432)], fill=C_SIGN_LINE, width=2)
-        _caption(draw, (x0 + x1) // 2, 1440, caption, size=30)
+        _caption(draw, (x0 + x1) // 2, 1434, caption, size=30)
 
     draw.text((2387, 1432), "М.П.", fill=C_LABEL,
               font=get_echoes_font(38, bold=True), anchor="rs")

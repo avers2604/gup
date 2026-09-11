@@ -15,13 +15,18 @@ def test_windows_pr_smoke_builds_and_self_tests_exe():
     assert "permissions:\n  contents: read" in workflow
 
 
-def test_release_signing_prefers_azure_when_both_methods_are_configured():
+def test_release_signing_prefers_managed_artifact_signing_then_pfx_fallbacks():
     workflow = (ROOT / ".github" / "workflows" / "build-exe.yml").read_text(
         encoding="utf-8"
     )
-    assert "if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' }}" in workflow
+    assert "if: ${{ env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}" in workflow
+    assert (
+        "if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' && "
+        "env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' }}"
+    ) in workflow
     assert (
         "if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && "
+        "env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' && "
         "env.HAS_AZURE_SIGNING_SECRETS != 'true' }}"
     ) in workflow
 

@@ -14,6 +14,13 @@ jobs:
     runs-on: windows-latest
     env:
       RELEASE_TAG: ${{ github.ref_name }}
+      HAS_ARTIFACT_SIGNING_SECRETS: >-
+        ${{ secrets.AZURE_CLIENT_ID != '' &&
+            secrets.AZURE_TENANT_ID != '' &&
+            secrets.AZURE_SUBSCRIPTION_ID != '' &&
+            secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT != '' &&
+            secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME != '' &&
+            secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE != '' }}
       HAS_AZURE_SIGNING_SECRETS: >-
         ${{ secrets.AZURE_CLIENT_ID != '' &&
             secrets.AZURE_TENANT_ID != '' &&
@@ -47,7 +54,7 @@ jobs:
       - name: Require trusted signing for stable release
         shell: pwsh
         run: |
-          if ('${{ env.HAS_AZURE_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_WINDOWS_SIGNING_SECRETS }}' -ne 'true') {
+          if ('${{ env.HAS_ARTIFACT_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_AZURE_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_WINDOWS_SIGNING_SECRETS }}' -ne 'true') {
             throw 'Stable release requires trusted Authenticode signing secrets. See docs/SIGNING.md.'
           }
 
@@ -83,15 +90,27 @@ jobs:
           if ($check.ExitCode -ne 0) { throw 'Smoke test failed' }
 
       - name: Azure login
-        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
+        if: ${{ env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' || env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
         uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac # v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Sign EXE with Azure certificate
-        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
+      - name: Sign EXE with Azure Artifact Signing
+        if: ${{ env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
+          files: ${{ github.workspace }}\dist\GET-Passes.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Sign EXE with Azure Key Vault certificate
+        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
           AZURE_KEY_VAULT_NAME: ${{ secrets.AZURE_KEY_VAULT_NAME }}
@@ -107,7 +126,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'EXE signing failed' }
 
       - name: Sign EXE with PFX certificate
-        if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
+        if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
           WINDOWS_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_SIGN_CERT_BASE64 }}
@@ -136,8 +155,20 @@ jobs:
           & $isccPath 'installer\GET-Passes.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Inno Setup build failed' }
 
-      - name: Sign installer with Azure certificate
-        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
+      - name: Sign installer with Azure Artifact Signing
+        if: ${{ env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
+          files: ${{ github.workspace }}\dist\installer\GET-Passes-Setup.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Sign installer with Azure Key Vault certificate
+        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
           AZURE_SIGN_CERT_PASSWORD: ${{ secrets.AZURE_SIGN_CERT_PASSWORD }}
@@ -150,7 +181,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installer signing failed' }
 
       - name: Sign installer with PFX certificate
-        if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
+        if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
           WINDOWS_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
