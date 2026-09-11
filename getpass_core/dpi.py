@@ -9,6 +9,36 @@ BASE_DPI = 96.0
 _awareness_result: str | None = None
 
 
+def _try_per_monitor_v2() -> bool:
+    try:
+        user32 = ctypes.windll.user32
+        user32.SetProcessDpiAwarenessContext.argtypes = [wintypes.HANDLE]
+        user32.SetProcessDpiAwarenessContext.restype = wintypes.BOOL
+        return bool(user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)))
+    except Exception:
+        return False
+
+
+def _try_per_monitor() -> bool:
+    try:
+        shcore = ctypes.windll.shcore
+        shcore.SetProcessDpiAwareness.argtypes = [ctypes.c_int]
+        shcore.SetProcessDpiAwareness.restype = ctypes.HRESULT
+        return shcore.SetProcessDpiAwareness(2) == 0
+    except Exception:
+        return False
+
+
+def _try_system_dpi() -> bool:
+    try:
+        user32 = ctypes.windll.user32
+        user32.SetProcessDPIAware.argtypes = []
+        user32.SetProcessDPIAware.restype = wintypes.BOOL
+        return bool(user32.SetProcessDPIAware())
+    except Exception:
+        return False
+
+
 def enable_dpi_awareness() -> str:
     global _awareness_result
     if _awareness_result is not None:
@@ -17,40 +47,16 @@ def enable_dpi_awareness() -> str:
         _awareness_result = "не Windows"
         return _awareness_result
 
-    # 1. Per-Monitor v2 (Windows 10 1703+)
-    try:
-        u32 = ctypes.windll.user32
-        u32.SetProcessDpiAwarenessContext.argtypes = [wintypes.HANDLE]
-        u32.SetProcessDpiAwarenessContext.restype = wintypes.BOOL
-        # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
-        if u32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
-            _awareness_result = "per-monitor-v2"
+    strategies = (
+        ("per-monitor-v2", _try_per_monitor_v2),
+        ("per-monitor", _try_per_monitor),
+        ("system", _try_system_dpi),
+    )
+    for result, strategy in strategies:
+        if strategy():
+            _awareness_result = result
             return _awareness_result
-    except Exception:
-        pass
-
-    # 2. Per-Monitor (Windows 8.1+)
-    try:
-        shcore = ctypes.windll.shcore
-        shcore.SetProcessDpiAwareness.argtypes = [ctypes.c_int]
-        shcore.SetProcessDpiAwareness.restype = ctypes.HRESULT
-        if shcore.SetProcessDpiAwareness(2) == 0:
-            _awareness_result = "per-monitor"
-            return _awareness_result
-    except Exception:
-        pass
-
-    # 3. System DPI (Vista+)
-    try:
-        u32 = ctypes.windll.user32
-        u32.SetProcessDPIAware.argtypes = []
-        u32.SetProcessDPIAware.restype = wintypes.BOOL
-        if u32.SetProcessDPIAware():
-            _awareness_result = "system"
-            return _awareness_result
-    except Exception:
-        _awareness_result = "недоступно"
-
+    _awareness_result = "недоступно"
     return _awareness_result
 
 
