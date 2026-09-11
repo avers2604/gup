@@ -5,7 +5,14 @@ from typing import Literal
 
 from getpass_core.domain import parse_date, split_fio
 
-DEFAULT_BADGE_PARK = 'ОСП «Трамвайный парк № 8»'
+BADGE_PARKS = (
+    'ОСП «Трамвайный парк № 8»',
+    'ОСП «Трамвайный парк № 5»',
+    'ОСП «Трамвайный парк № 7»',
+    'ОСП «Троллейбусный парк № 1»',
+    'ПТО "Шаврова"',
+)
+DEFAULT_BADGE_PARK = BADGE_PARKS[0]
 
 
 @dataclass(frozen=True)
