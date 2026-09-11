@@ -1,9 +1,9 @@
-# Единственная обязательная зависимость: отрисовка бланков и работа с изображениями.
-# tkinter входит в стандартную поставку Python для Windows.
+# Runtime dependencies for rendering, cryptography and the PySide6 preview UI.
 Pillow==12.3.0
 cryptography==50.0.1
+PySide6==6.11.2
 
-# Для разработки и тестов (не нужны для работы программы):
+# Для разработки и тестов (не нужны отдельно при установке requirements-dev.txt):
 #   pytest>=8.0
 #   pypdf>=4.0      — проверка корректности генерируемых PDF
 #   pyflakes>=3.0   — статический анализ (ловит NameError до запуска)
