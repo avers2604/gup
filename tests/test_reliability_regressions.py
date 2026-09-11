@@ -110,7 +110,7 @@ def test_batch_success_confirms_journal(journal, monkeypatch, tmp_path):
     assert records[0]["plate"] == "A111AA78"
 
 
-def test_batch_pdf_failure_keeps_prepared_operation(journal, monkeypatch, tmp_path):
+def test_batch_pdf_failure_does_not_leave_prepared_operation(journal, monkeypatch, tmp_path):
     import getpass_ui.batch as batch
 
     output = tmp_path / "batch.pdf"
@@ -136,7 +136,7 @@ def test_batch_pdf_failure_keeps_prepared_operation(journal, monkeypatch, tmp_pa
     )
 
     assert result is False
-    assert len(issuance.pending(journal)) == 1
+    assert issuance.pending(journal) == []
     assert any(kind == "error" and title == "Ошибка" for kind, title, _ in messages)
 
 

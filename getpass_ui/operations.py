@@ -5,18 +5,23 @@ from tkinter import messagebox, ttk
 from getpass_core import issuance
 from getpass_core.storage import BADGE_JOURNAL, PASS_JOURNAL
 
+_SUPPORTED_DOCUMENT_EXTENSIONS = (".pdf", ".jpg", ".png")
+
 
 class _OperationsDialog:
     def __init__(self, parent, theme):
         self.win = theme.toplevel(parent, "Незавершённые выдачи")
-        self.win.geometry("1000x550")
+        self.win.geometry("1120x550")
         ttk.Label(
             self.win,
-            text="Операции сохраняются до печати. Подтверждайте выдачу после проверки документа.",
+            text=(
+                "Здесь показаны операции, для которых выдача ещё не подтверждена. "
+                "Подтвердите только фактически выданный документ или отмените операцию."
+            ),
         ).pack(pady=12)
         self.tree = ttk.Treeview(
             self.win,
-            columns=("created", "journal", "destination"),
+            columns=("created", "journal", "destination", "document"),
             show="headings",
         )
         self._configure_tree()
@@ -27,13 +32,14 @@ class _OperationsDialog:
 
     def _configure_tree(self):
         columns = (
-            ("created", "Создана"),
-            ("journal", "Журнал"),
-            ("destination", "Файл / принтер"),
+            ("created", "Создана", 210),
+            ("journal", "Журнал", 190),
+            ("destination", "Файл / принтер", 430),
+            ("document", "Документ", 170),
         )
-        for key, label in columns:
+        for key, label, width in columns:
             self.tree.heading(key, text=label)
-            self.tree.column(key, width=250)
+            self.tree.column(key, width=width)
 
     def _build_buttons(self):
         bar = ttk.Frame(self.win)
@@ -41,6 +47,9 @@ class _OperationsDialog:
         ttk.Button(bar, text="Обновить", command=self.refresh).pack(side="left")
         ttk.Button(bar, text="Открыть документ", command=self.open_file).pack(
             side="left", padx=8
+        )
+        ttk.Button(bar, text="Отменить операцию", command=self.cancel).pack(
+            side="left"
         )
         ttk.Button(bar, text="Подтвердить выдачу", command=self.confirm).pack(side="right")
 
@@ -53,11 +62,17 @@ class _OperationsDialog:
     def _load_journal(self, journal):
         for job in issuance.pending(journal):
             self.jobs[job["id"]] = (journal, job)
+            destination = job["destination"]
             self.tree.insert(
                 "",
                 "end",
                 iid=job["id"],
-                values=(job["created_at"], journal.schema.name, job["destination"]),
+                values=(
+                    job["created_at"],
+                    journal.schema.name,
+                    destination,
+                    self._document_status(destination),
+                ),
             )
 
     def confirm(self):
@@ -77,23 +92,61 @@ class _OperationsDialog:
         except Exception as exc:
             messagebox.showerror("Не удалось подтвердить", str(exc), parent=self.win)
 
+    def cancel(self):
+        selected = self.tree.selection()
+        if not selected:
+            return
+        if not messagebox.askyesno(
+            "Отменить операцию",
+            "Отменённые операции нельзя будет подтвердить позже. Продолжить?",
+            parent=self.win,
+        ):
+            return
+        try:
+            for key in selected:
+                issuance.cancel(self.jobs[key][0], key)
+            self.refresh()
+        except Exception as exc:
+            messagebox.showerror("Не удалось отменить", str(exc), parent=self.win)
+
     def open_file(self):
         selected = self.tree.selection()
         if not selected:
             return
         path = self.jobs[selected[0]][1]["destination"]
-        if self._can_open(path):
-            os.startfile(path)
+        if not self._is_document_path(path):
+            messagebox.showinfo(
+                "Прямая печать",
+                "Эта операция связана с принтером и не содержит сохранённого файла.",
+                parent=self.win,
+            )
             return
-        messagebox.showinfo(
-            "Файл недоступен",
-            "Документ не сохранён. Повторите подготовку по данным операции.",
-            parent=self.win,
-        )
+        if not os.path.isfile(path):
+            messagebox.showwarning(
+                "Файл не найден",
+                "Сохранённый документ отсутствует. Проверьте выдачу и отмените операцию, "
+                "если документ фактически не был выдан.",
+                parent=self.win,
+            )
+            return
+        try:
+            os.startfile(path)  # noqa: Windows only
+        except Exception as exc:
+            messagebox.showerror(
+                "Не удалось открыть документ",
+                str(exc),
+                parent=self.win,
+            )
 
     @staticmethod
-    def _can_open(path):
-        return os.path.isfile(path) and path.lower().endswith((".pdf", ".jpg", ".png"))
+    def _is_document_path(path):
+        return bool(path) and path.lower().endswith(_SUPPORTED_DOCUMENT_EXTENSIONS)
+
+    @classmethod
+    def _document_status(cls, path):
+        if not cls._is_document_path(path):
+            return "Прямая печать"
+        return "Файл готов" if os.path.isfile(path) else "Файл не найден"
 
 
 def open_operations(parent, theme):

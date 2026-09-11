@@ -85,8 +85,9 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # Azure имеет приоритет, если настроены оба способа подписи.
       - name: Подписать EXE сертификатом из Azure Key Vault
-        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' && env.HAS_WINDOWS_SIGNING_SECRETS != 'true' }}
+        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
         shell: pwsh
         env:
           AZURE_KEY_VAULT_NAME: ${{ secrets.AZURE_KEY_VAULT_NAME }}

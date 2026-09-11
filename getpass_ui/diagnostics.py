@@ -5,6 +5,7 @@ import os
 import sqlite3
 import sys
 import tkinter as tk
+from contextlib import closing
 from tkinter import ttk
 
 from getpass_core import config
@@ -23,7 +24,7 @@ def open_diagnostics(parent, theme):
         ("Размер БД", f"{os.path.getsize(config.DB_FILE) // 1024} КБ" if os.path.exists(config.DB_FILE) else "нет"),
     ]
     try:
-        with sqlite3.connect(config.DB_FILE, timeout=3) as conn:
+        with closing(sqlite3.connect(config.DB_FILE, timeout=3)) as conn:
             result = conn.execute("PRAGMA integrity_check").fetchone()[0]
         rows.append(("Проверка SQLite", result))
     except Exception as exc:

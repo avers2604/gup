@@ -95,7 +95,7 @@ def _prepare_batch_pdf(journal, log_records, save_path, page_builder, cancelled)
     operation_id = issuance.prepare(journal, log_records, save_path)
     try:
         save_pdf_pages(_cancellable_pages(page_builder, cancelled), save_path)
-    except _BatchCancelled:
+    except Exception:
         issuance.cancel(journal, operation_id)
         raise
     return operation_id
