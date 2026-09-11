@@ -301,10 +301,6 @@ class Journal:
         """Применить явные миграции SQLite последовательно и идемпотентно."""
         conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
         current = int(conn.execute("PRAGMA user_version").fetchone()[0])
-        migrations = {
-            1: "initial journal and audit tables",
-            2: "indexes and immutable audit history",
-        }
         for version in range(current + 1, SCHEMA_VERSION + 1):
             conn.execute("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                          (version, datetime.now().astimezone().isoformat()))

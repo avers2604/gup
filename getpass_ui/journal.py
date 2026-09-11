@@ -5,7 +5,7 @@ import os
 import json
 import tkinter as tk
 from datetime import datetime
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from getpass_core import blacklist
 from getpass_core.domain import parse_date
@@ -39,6 +39,7 @@ class JournalWindow:
         self.page = 0
         self.page_size = 100
         self._extra_widgets = {}
+        self.saved_filters = {}
 
         th = theme
         self.win = th.toplevel(parent, title)
@@ -144,6 +145,8 @@ class JournalWindow:
         ttk.Button(bar, text="←", command=lambda: self.turn_page(-1)).pack(side="left")
         ttk.Button(bar, text="→", command=lambda: self.turn_page(1)).pack(side="left")
         ttk.Button(bar, text="Обновить", command=self.reload).pack(side="left")
+        ttk.Button(bar, text="Сохранить фильтр", command=self.save_filter).pack(side="left", padx=(th.sp(2), 0))
+        ttk.Button(bar, text="Экспорт текущего", command=self.export_current).pack(side="left", padx=(th.sp(2), 0))
         ttk.Button(bar, text="Открыть в Excel", command=self.open_excel,
                    style="Ghost.TButton").pack(side="right")
         ttk.Button(bar, text="Аннулировать", command=self.revoke_selected,
@@ -371,6 +374,33 @@ class JournalWindow:
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось открыть файл: {exc}",
                                  parent=self.win)
+
+
+    def _filter_snapshot(self):
+        return {
+            "search": self.search_var.get(), "status": self.filter_var.get(),
+            "date_from": self.date_from.get(), "date_to": self.date_to.get(),
+            "extra": {key: field.get() for key, field in self._extra_widgets.items()},
+        }
+
+    def save_filter(self):
+        name = simpledialog.askstring("Сохранить фильтр", "Название фильтра:", parent=self.win)
+        if name and name.strip():
+            self.saved_filters[name.strip()] = self._filter_snapshot()
+
+    def export_current(self):
+        path = filedialog.asksaveasfilename(parent=self.win, defaultextension=".xlsx",
+            filetypes=[("Excel", "*.xlsx")], initialfile="выборка_журнала.xlsx")
+        if not path:
+            return
+        ids = set(self.tree.get_children())
+        records = [r for r in self.records if r.get("id") in ids]
+        try:
+            rows = [[rec.get(k, "") for k in self.schema.keys] for rec in records]
+            export_records_to_xlsx(rows, self.schema.cols_def, path, self.schema.name)
+            messagebox.showinfo("Экспорт завершён", f"Записей: {len(records)}\n{path}", parent=self.win)
+        except Exception as exc:
+            messagebox.showerror("Ошибка экспорта", str(exc), parent=self.win)
 
 
 class EditRecordDialog:
