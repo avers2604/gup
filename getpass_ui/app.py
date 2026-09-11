@@ -823,6 +823,34 @@ class App:
         self.save_settings()
         return True
 
+    def _save_pass_file(self, document, back_document, path):
+        is_pdf = os.path.splitext(path)[1].lower() == ".pdf"
+        if back_document is not None and is_pdf:
+            printing.save_pdf_pages([document, back_document], path)
+            return
+        printing.save_document(document, path)
+        if back_document is not None:
+            messagebox.showinfo(
+                "Оборот не сохранён",
+                "Оборотная сторона поддерживается только при сохранении в PDF.\n"
+                "Сохранена только лицевая сторона.",
+            )
+
+    def _report_pass_save_failure(self, operation_id, exc):
+        recovery_note = ""
+        if operation_id is not None:
+            try:
+                issuance.cancel(PASS_JOURNAL, operation_id)
+                self._issuance_id = None
+            except Exception as cancel_exc:
+                recovery_note = (
+                    "\n\nОперация осталась в «Незавершённых выдачах»: "
+                    f"{cancel_exc}"
+                )
+        messagebox.showerror(
+            "Ошибка", f"Не удалось сохранить файл:\n{exc}{recovery_note}"
+        )
+
     def generate_pass(self):
         built = self.build_documents()
         if not built:
@@ -834,34 +862,13 @@ class App:
             initialfile=f"{prefix}.pdf")
         if not path:
             return
-        is_pdf = os.path.splitext(path)[1].lower() == ".pdf"
         operation_id = None
         try:
             operation_id = issuance.prepare(PASS_JOURNAL, records, path)
             self._issuance_id = operation_id
-            if back_document is not None and is_pdf:
-                printing.save_pdf_pages([document, back_document], path)
-            else:
-                printing.save_document(document, path)
-                if back_document is not None:
-                    messagebox.showinfo(
-                        "Оборот не сохранён",
-                        "Оборотная сторона поддерживается только при сохранении в PDF.\n"
-                        "Сохранена только лицевая сторона.")
+            self._save_pass_file(document, back_document, path)
         except Exception as exc:
-            recovery_note = ""
-            if operation_id is not None:
-                try:
-                    issuance.cancel(PASS_JOURNAL, operation_id)
-                    self._issuance_id = None
-                except Exception as cancel_exc:
-                    recovery_note = (
-                        "\n\nОперация осталась в «Незавершённых выдачах»: "
-                        f"{cancel_exc}"
-                    )
-            messagebox.showerror(
-                "Ошибка", f"Не удалось сохранить файл:\n{exc}{recovery_note}"
-            )
+            self._report_pass_save_failure(operation_id, exc)
             return
         if not self._finish_pass(records, next_num):
             return
