@@ -16,12 +16,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: codex/reliability-hardening
-      - name: Normalize targeted Bandit suppressions
+      - name: Normalize suppressions and remaining long lines
         run: |
           python - <<'PY'
           from pathlib import Path
-          path = Path("getpass_core/storage.py")
-          text = path.read_text(encoding="utf-8")
+
+          storage = Path("getpass_core/storage.py")
+          text = storage.read_text(encoding="utf-8")
           suffixes = [
               "# nosec B608 -- identifiers come from validated JournalSchema",
               "# nosec B608 -- validated schema table",
@@ -30,7 +31,52 @@ jobs:
           ]
           for suffix in suffixes:
               text = text.replace(suffix, "# nosec B608")
-          path.write_text(text, encoding="utf-8")
+
+          storage_replacements = [
+              (
+                  '        \'  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>\\n\'\n',
+                  '        \'  <Override PartName="/xl/workbook.xml" \'\n'
+                  '        \'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>\\n\'\n',
+              ),
+              (
+                  '        \'  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>\\n\'\n',
+                  '        \'  <Override PartName="/xl/worksheets/sheet1.xml" \'\n'
+                  '        \'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>\\n\'\n',
+              ),
+              (
+                  '        \'  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>\\n\'\n',
+                  '        \'  <Relationship Id="rId1" \'\n'
+                  '        \'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" \'\n'
+                  '        \'Target="xl/workbook.xml"/>\\n\'\n',
+              ),
+              (
+                  '        \'  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>\\n\'\n',
+                  '        \'  <Relationship Id="rId1" \'\n'
+                  '        \'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" \'\n'
+                  '        \'Target="worksheets/sheet1.xml"/>\\n\'\n',
+              ),
+          ]
+          for old, new in storage_replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f"storage replacement count={text.count(old)} for {old!r}")
+              text = text.replace(old, new, 1)
+          storage.write_text(text, encoding="utf-8")
+
+          app = Path("getpass_ui/app.py")
+          app_text = app.read_text(encoding="utf-8")
+          old = '''            password = simpledialog.askstring(
+                "Пароль копии", "Не менее 12 символов. Сохраните пароль: без него восстановление невозможно.", show="*", parent=self.root)
+'''
+          new = '''            password = simpledialog.askstring(
+                "Пароль копии",
+                "Не менее 12 символов. Сохраните пароль: без него восстановление невозможно.",
+                show="*",
+                parent=self.root,
+            )
+'''
+          if app_text.count(old) != 1:
+              raise SystemExit(f"app replacement count={app_text.count(old)}")
+          app.write_text(app_text.replace(old, new, 1), encoding="utf-8")
           PY
       - name: Run strict style and security checks
         run: |
