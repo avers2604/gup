@@ -20,16 +20,44 @@ def test_cancelled_issuance_is_not_pending_and_cannot_be_confirmed(journal):
     assert journal.read() == []
 
 
-def test_batch_cancel_marks_prepared_issuance_cancelled(journal, monkeypatch, tmp_path):
+def _configure_batch_ui(monkeypatch, batch, output, messages, open_file=False):
     from tkinter import filedialog, messagebox
-    import getpass_ui.batch as batch
 
-    output = tmp_path / "batch.pdf"
     monkeypatch.setattr(batch, "review_import", lambda *args, **kwargs: True)
     monkeypatch.setattr(
         filedialog, "asksaveasfilename", lambda *args, **kwargs: str(output)
     )
-    monkeypatch.setattr(messagebox, "showinfo", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        messagebox,
+        "showinfo",
+        lambda title, text, **kwargs: messages.append(("info", title, text)),
+    )
+    monkeypatch.setattr(
+        messagebox,
+        "showwarning",
+        lambda title, text, **kwargs: messages.append(("warning", title, text)),
+    )
+    monkeypatch.setattr(
+        messagebox,
+        "showerror",
+        lambda title, text, **kwargs: messages.append(("error", title, text)),
+    )
+    monkeypatch.setattr(messagebox, "askyesno", lambda *args, **kwargs: open_file)
+
+
+def _run_batch_work_inline(monkeypatch, batch):
+    def inline(_parent, work, _title, **_kwargs):
+        return work()
+
+    monkeypatch.setattr(batch, "run_task", inline)
+
+
+def test_batch_cancel_marks_prepared_issuance_cancelled(journal, monkeypatch, tmp_path):
+    import getpass_ui.batch as batch
+
+    output = tmp_path / "batch.pdf"
+    messages = []
+    _configure_batch_ui(monkeypatch, batch, output, messages)
 
     def cancel_before_work(_parent, work, _title, cancelled=None, **_kwargs):
         cancelled.set()
@@ -51,6 +79,100 @@ def test_batch_cancel_marks_prepared_issuance_cancelled(journal, monkeypatch, tm
 
     assert result is False
     assert issuance.pending(journal) == []
+    assert any(kind == "info" and title == "Отменено" for kind, title, _ in messages)
+
+
+def test_batch_success_confirms_journal(journal, monkeypatch, tmp_path):
+    import getpass_ui.batch as batch
+
+    output = tmp_path / "batch.pdf"
+    messages = []
+    _configure_batch_ui(monkeypatch, batch, output, messages)
+    _run_batch_work_inline(monkeypatch, batch)
+    monkeypatch.setattr(batch, "save_pdf_pages", lambda pages, path: list(pages))
+
+    result = batch.run_batch(
+        object(),
+        None,
+        "Массовая печать",
+        [{"num": "1"}],
+        lambda: iter([object()]),
+        1,
+        journal,
+        [{"num": "1", "plate": "A111AA78"}],
+        "batch.pdf",
+    )
+
+    assert result is True
+    assert issuance.pending(journal) == []
+    records = journal.read()
+    assert len(records) == 1
+    assert records[0]["plate"] == "A111AA78"
+
+
+def test_batch_pdf_failure_keeps_prepared_operation(journal, monkeypatch, tmp_path):
+    import getpass_ui.batch as batch
+
+    output = tmp_path / "batch.pdf"
+    messages = []
+    _configure_batch_ui(monkeypatch, batch, output, messages)
+    _run_batch_work_inline(monkeypatch, batch)
+
+    def fail_pdf(_pages, _path):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(batch, "save_pdf_pages", fail_pdf)
+
+    result = batch.run_batch(
+        object(),
+        None,
+        "Массовая печать",
+        [{"num": "1"}],
+        lambda: iter([object()]),
+        1,
+        journal,
+        [{"num": "1", "plate": "A111AA78"}],
+        "batch.pdf",
+    )
+
+    assert result is False
+    assert len(issuance.pending(journal)) == 1
+    assert any(kind == "error" and title == "Ошибка" for kind, title, _ in messages)
+
+
+def test_batch_file_busy_reports_unconfirmed_journal(journal, monkeypatch, tmp_path):
+    from getpass_core.storage import FileBusy
+    import getpass_ui.batch as batch
+
+    output = tmp_path / "batch.pdf"
+    messages = []
+    _configure_batch_ui(monkeypatch, batch, output, messages)
+    _run_batch_work_inline(monkeypatch, batch)
+    monkeypatch.setattr(batch, "save_pdf_pages", lambda pages, path: list(pages))
+    monkeypatch.setattr(
+        issuance,
+        "confirm",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(FileBusy("journal.xlsx")),
+    )
+
+    result = batch.run_batch(
+        object(),
+        None,
+        "Массовая печать",
+        [{"num": "1"}],
+        lambda: iter([object()]),
+        1,
+        journal,
+        [{"num": "1", "plate": "A111AA78"}],
+        "batch.pdf",
+    )
+
+    assert result is False
+    assert len(issuance.pending(journal)) == 1
+    assert any(
+        kind == "error" and title == "Журнал не обновлён"
+        for kind, title, _ in messages
+    )
 
 
 def test_delete_ids_preserves_record_added_during_delete(journal, monkeypatch):
@@ -77,7 +199,6 @@ def test_delete_ids_preserves_record_added_during_delete(journal, monkeypatch):
             ])
             allow_replacement.set()
         else:
-            # Atomic implementations do not enter the legacy table-replacement path.
             journal.append_many([
                 {"id": "concurrent", "num": "3", "plate": "C333CC78"}
             ])
