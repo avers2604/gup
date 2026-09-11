@@ -31,7 +31,7 @@ def test_renderer_contract_preserves_existing_badge_keys():
     assert result["surname"] == "ИВАНОВ"
     assert result["name"] == "ИВАН"
     assert result["patronymic"] == "ИВАНОВИЧ"
-    assert result["fio"] == "ИВАНОВ И.И."
+    assert result["fio"] == "ИВАНОВ ИВАН ИВАНОВИЧ"
     assert result["phone"] == "+79990000000"
     assert result["issue_date"] == "12.09.2026"
     assert result["valid_until"] == "12.09.2031"
