@@ -218,7 +218,9 @@ def test_one_sided_print_prepares_prints_confirms_and_updates_cache():
 def test_two_sided_print_uses_existing_duplex_helper():
     calls = []
     service = output_service(calls)
-    confirm_flip = lambda: True
+
+    def confirm_flip():
+        return True
 
     service.print_passes(
         valid_state(print_back=True),
