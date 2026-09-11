@@ -1,0 +1,30 @@
+name: Apply C901 refactor once
+
+on:
+  push:
+    branches: ["codex/reduce-c901"]
+    paths:
+      - ".github/refactor_c901_once.py"
+      - ".github/workflows/refactor-c901-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: codex/reduce-c901
+      - name: Apply verified replacements
+        run: python .github/refactor_c901_once.py
+      - name: Commit refactor and remove one-shot tooling
+        run: |
+          git rm .github/refactor_c901_once.py .github/workflows/refactor-c901-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add getpass_core/storage.py getpass_ui/app.py getpass_ui/journal.py
+          git commit -m "refactor: reduce remaining storage and UI complexity"
+          git push origin HEAD:codex/reduce-c901
