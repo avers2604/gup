@@ -2,6 +2,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from tools.update_renderer_contract import _git_blob_sha as _manifest_blob_sha
+
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "tests" / "fixtures" / "renderer_contract.json"
 PROTECTED_FILES = (
@@ -39,6 +41,16 @@ def test_python_contract_hash_is_line_ending_independent(tmp_path):
     crlf.write_bytes(b"def render():\r\n    return 1\r\n")
 
     assert _git_blob_sha(lf) == _git_blob_sha(crlf)
+
+
+def test_manifest_tool_uses_same_line_ending_independent_hash(tmp_path):
+    lf = tmp_path / "renderer_lf.py"
+    crlf = tmp_path / "renderer_crlf.py"
+    lf.write_bytes(b"def render():\n    return 1\n")
+    crlf.write_bytes(b"def render():\r\n    return 1\r\n")
+
+    assert _manifest_blob_sha(lf) == _manifest_blob_sha(crlf)
+    assert _manifest_blob_sha(lf) == _git_blob_sha(lf)
 
 
 def test_binary_contract_hash_preserves_exact_bytes(tmp_path):
