@@ -11,6 +11,7 @@ class FakePageService:
     def __init__(self):
         self.lookup_result = None
         self.preview_image = Image.new("RGB", (400, 200), "white")
+        self.preview_calls = []
         self.saved = []
         self.printed = []
 
@@ -18,6 +19,7 @@ class FakePageService:
         return self.lookup_result
 
     def render_preview(self, data, common):
+        self.preview_calls.append((data, common))
         return self.preview_image
 
     def save_pdf(self, state, path):
@@ -151,6 +153,20 @@ def test_editing_plate_updates_viewmodel(qtbot):
     page.pass_fields["first"]["plate"].setText("а111аа78")
 
     assert vm.state.first.plate == "А111АА78"
+
+
+def test_preview_rendering_is_debounced_during_typing(qtbot):
+    page, vm, service = make_page(qtbot)
+    initial_calls = len(service.preview_calls)
+    plate = page.pass_fields["first"]["plate"]
+
+    plate.setText("А")
+    plate.setText("А1")
+    plate.setText("А11")
+
+    assert len(service.preview_calls) == initial_calls
+    qtbot.wait(200)
+    assert len(service.preview_calls) == initial_calls + 1
 
 
 def test_plate_editing_finished_autocompletes_vehicle_only(qtbot):
