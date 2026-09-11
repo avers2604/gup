@@ -21,31 +21,37 @@ python pass_generator.py
 
 ## PySide6 preview (GET-Passes 2.0 migration)
 
-На Phase 1 production entry point остаётся текущим Tkinter-приложением:
+На Phase 2 production entry point по-прежнему остаётся текущим Tkinter-приложением:
 
 ```bash
 python pass_generator.py
 ```
 
-Новый PySide6 shell запускается отдельно и предназначен для разработки и
+Новый PySide6 preview запускается отдельно и предназначен для разработки и
 проверки миграции GET-Passes 2.0:
 
 ```bash
 python -m getpass_qt
 ```
 
-Headless/self-test нового shell:
+Headless/self-test нового интерфейса:
 
 ```bash
 python -m getpass_qt --self-test
 ```
 
-PySide6 preview использует существующие GET design tokens, но пока не заменяет
-production workflows выпуска пропусков. Печатные пропуска и бейджи продолжают
-создаваться существующим renderer; Phase 1 не меняет SQLite schema, внешний вид
-печатных форм, release pipeline или production installer. В Windows CI отдельно
-собирается `GET-Passes-Qt-Preview.exe`, который не подписывается, не публикуется
-как production release и не устанавливается через Inno Setup.
+В Phase 2 маршрут **«Пропуск ТС»** уже является реальным вертикальным workflow:
+две формы пропуска на А4 или один пропуск на А5, автоподстановка только данных
+автомобиля, live preview через существующий renderer, сохранение PDF,
+односторонняя/двусторонняя печать и durable issuance с записью в действующий
+SQLite-журнал после успешного внешнего вывода. Старые ФИО водителя, телефон и
+зона допуска по госномеру не восстанавливаются.
+
+Остальные маршруты PySide6 пока остаются миграционными экранами и продолжают
+полноценно работать в production Tkinter-приложении. Phase 2 не меняет SQLite
+schema, внешний вид печатных форм, production entry point, release pipeline или
+production installer. В Windows CI отдельно собирается `GET-Passes-Qt-Preview.exe`;
+он не подписывается и не публикуется как production release.
 
 ## Сборка в один EXE
 
@@ -149,12 +155,12 @@ pyinstaller --noconfirm --clean --onefile --windowed --icon app_icon.ico --name 
 
 Базовые GET-токены вынесены в presentation-neutral `getpass_design/tokens.py`.
 `getpass_ui/tokens.py` сохраняет совместимость Tkinter-кода через re-export,
-`getpass_ui/theme.py` строит ttk-стили, а `getpass_qt/theme.py` формирует QSS
-для PySide6. Палитра остаётся брендовой: тёмно-синий/тил/красный/жёлтый,
-с общими отступами, типографикой и радиусами.
+`getpass_ui/theme.py` строит ttk-стили, а `getpass_qt/theme/stylesheet.py`
+формирует QSS для PySide6. Палитра остаётся брендовой:
+тёмно-синий/тил/красный/жёлтый, с общими отступами, типографикой и радиусами.
 
 `getpass_ui/components.py` собирает готовые Tkinter-элементы форм (`Field`,
-`AutocompleteEntry`). PySide6 shell использует те же семантические токены,
+`AutocompleteEntry`). PySide6 интерфейс использует те же семантические токены,
 не вводя отдельную независимую палитру.
 
 ## Файлы рядом с программой
@@ -209,7 +215,7 @@ getpass_core/         предметная логика, без Tkinter/PySide6
   printing.py           печать через Windows (в т.ч. двусторонняя), сохранение документов
   backup.py             резервное копирование и восстановление
 getpass_design/       presentation-neutral GET design tokens
-getpass_app/          UI-независимый application boundary и настройки preview
+getpass_app/          UI-независимый application boundary и vehicle workflow orchestration
 getpass_ui/           production-интерфейс Tkinter
   tokens.py             compatibility re-export GET-токенов
   theme.py              движок оформления: стили ttk, Card, светлая/тёмная тема
@@ -221,7 +227,7 @@ getpass_ui/           production-интерфейс Tkinter
   crop_window.py        кадрирование фотографии, овальная направляющая
   batch.py              массовая печать
   widgets.py            общие элементы (прокрутка, диалог прогресса)
-getpass_qt/           PySide6 Phase-1 preview shell и MVVM-lite navigation
+getpass_qt/           PySide6 Phase-2 preview: реальный «Пропуск ТС» + MVVM-lite shell
 tests/                автотесты
 ```
 
@@ -238,7 +244,7 @@ tests/                автотесты
 pip install -r requirements-dev.txt
 python -m pytest                    # логика, хранилище, renderer, Tkinter и PySide6 preview
 xvfb-run -a python -m pytest        # + headless-проверка интерфейсов (Linux/CI)
-python -m getpass_qt --self-test    # отдельный smoke PySide6 shell
+python -m getpass_qt --self-test    # smoke: shell + маршрут ТС + binding + renderer preview
 python pass_generator.py --self-test
 ```
 
@@ -273,12 +279,15 @@ EXE и прежний production installer.
 
 ## Статус миграции на PySide6
 
-Phase 1 добавляет фундамент GET-Passes 2.0 рядом с действующим интерфейсом:
-UI-независимый `getpass_app`, общие design tokens, PySide6 theme engine,
-MVVM-lite navigation, Variant-A shell и отдельную CI-only Windows preview
-сборку. Это **не production cutover**.
+Phase 2 переносит первый production-grade вертикальный workflow GET-Passes 2.0 —
+**«Пропуск ТС»** — поверх Phase 1 foundation. PySide6 теперь использует
+UI-независимую модель/сервис, MVVM-lite ViewModel, Variant-A рабочий экран,
+существующий renderer, действующий SQLite-журнал и те же механизмы PDF/печати.
+Durable issuance сохраняет порядок `prepare → output → confirm`; при ошибке до
+подтверждения prepared-операция отменяется.
 
-Следующие фазы должны отдельно перенести реальные workflows пропуска ТС,
-бейджа, журналов/реестров и только затем переключать production entry point,
-PyInstaller/Inno/release pipeline. Физическая проверка на рабочем месте и
-принтере также относится к последующим фазам.
+Это всё ещё **не production cutover**: `pass_generator.py`, production
+PyInstaller/Inno и release pipeline остаются на Tkinter. Следующие фазы должны
+отдельно перенести бейджи, журналы/реестры, массовую печать и остальные
+операторские сценарии. Физическая приёмка на рабочем месте и реальном принтере
+также остаётся обязательным отдельным этапом перед переключением production.
