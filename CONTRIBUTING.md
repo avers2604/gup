@@ -16,6 +16,9 @@ pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 
+Поддерживаются Python 3.13 и 3.14; релизная Windows-сборка проверяется на
+Python 3.14.7.
+
 ## Запуск тестов
 
 ```bash
@@ -27,6 +30,10 @@ python -m pytest --cov=getpass_core --cov=getpass_ui
 
 # Проверка синтаксиса
 pyflakes pass_generator.py getpass_core getpass_ui
+
+# Проверки безопасности
+python -m pip_audit -r requirements.txt
+python -m bandit -r getpass_core getpass_ui -lll
 
 # На Linux для тестов интерфейса
 xvfb-run -a python -m pytest
@@ -60,6 +67,9 @@ python pass_generator.py
 2. ✅ Нет ошибок синтаксиса: `pyflakes`
 3. ✅ Изменения не содержат персональных данных
 4. ✅ Коммит-сообщения на понятном вам языке
+
+Изменения интерфейса должны сохранять навигацию клавиатурой, видимый фокус,
+текстовые сообщения об ошибках и работу при масштабе Windows 125–200%.
 
 ## Внимание
 
