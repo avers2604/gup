@@ -37,6 +37,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
           python -m pip install pyinstaller==6.22.2
+          choco install innosetup -y --no-progress
 
       - name: Test on Windows before packaging
         run: python -m pytest
@@ -44,13 +45,6 @@ jobs:
       - name: Установить UPX (доп. сжатие .exe)
         run: choco install upx -y --no-progress
 
-      # UPX сжимает сам .exe (обычно на 40-60%) — PyInstaller находит upx.exe
-      # сам через PATH (choco ставит туда шим), доп. флаг не нужен.
-      # Компромисс: некоторые антивирусы эвристически подозревают
-      # UPX-упакованные exe (этим же приёмом пользуются вредоносы), поэтому
-      # возможно ложное срабатывание Defender/SmartScreen на рабочем
-      # компьютере. Если это случится — уберите шаг "Установить UPX" выше
-      # и пересоберите: PyInstaller соберёт обычный (несжатый UPX) exe.
       - name: Собрать .exe
         shell: pwsh
         run: |
@@ -94,21 +88,13 @@ jobs:
           AZURE_SIGN_CERT_NAME: ${{ secrets.AZURE_SIGN_CERT_NAME }}
           AZURE_SIGN_CERT_PASSWORD: ${{ secrets.AZURE_SIGN_CERT_PASSWORD }}
         run: |
-          $pfxPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
           az keyvault secret download --vault-name "$env:AZURE_KEY_VAULT_NAME" --name "$env:AZURE_SIGN_CERT_NAME" --file "$pfxPath" --encoding base64
-
-          $signtool = Get-Command signtool.exe -ErrorAction Stop
-          if (-not (Test-Path "dist\GET-Passes.exe")) {
-            throw "dist\GET-Passes.exe not found"
-          }
-
-          & $signtool.Source sign `
-            /fd SHA256 `
-            /tr http://timestamp.digicert.com `
-            /td SHA256 `
-            /f "$pfxPath" `
-            /p "$env:AZURE_SIGN_CERT_PASSWORD" `
-            /v "dist\GET-Passes.exe"
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found' }
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:AZURE_SIGN_CERT_PASSWORD" /v 'dist\GET-Passes.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'EXE signing failed' }
 
       - name: Подписать EXE обычным Windows сертификатом
         if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
@@ -117,49 +103,124 @@ jobs:
           WINDOWS_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_SIGN_CERT_BASE64 }}
           WINDOWS_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
         run: |
-          $certPath = Join-Path $env:RUNNER_TEMP "code-sign.pfx"
-          [System.IO.File]::WriteAllBytes($certPath, [System.Convert]::FromBase64String($env:WINDOWS_SIGN_CERT_BASE64))
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          [System.IO.File]::WriteAllBytes($pfxPath, [System.Convert]::FromBase64String($env:WINDOWS_SIGN_CERT_BASE64))
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found' }
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:WINDOWS_SIGN_CERT_PASSWORD" /v 'dist\GET-Passes.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'EXE signing failed' }
 
-          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
-            Where-Object { $_.FullName -match "x64" } |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-
-          if (-not $signtool) {
-            throw "signtool.exe not found"
-          }
-
-          if (-not (Test-Path "dist\GET-Passes.exe")) {
-            throw "dist\GET-Passes.exe not found"
-          }
-
-          & $signtool.FullName sign `
-            /fd SHA256 `
-            /tr http://timestamp.digicert.com `
-            /td SHA256 `
-            /f "$certPath" `
-            /p "$env:WINDOWS_SIGN_CERT_PASSWORD" `
-            /v "dist\GET-Passes.exe"
-
-      - name: Собрать папку для переноса
+      - name: Проверить Authenticode-подпись EXE
+        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' || env.HAS_WINDOWS_SIGNING_SECRETS == 'true' }}
         shell: pwsh
         run: |
-          $out = "dist\GET-Passes"
+          $signature = Get-AuthenticodeSignature 'dist\GET-Passes.exe'
+          if ($signature.Status -ne 'Valid') {
+            throw "Invalid EXE Authenticode signature: $($signature.Status) $($signature.StatusMessage)"
+          }
+
+      - name: Собрать установщик Inno Setup
+        shell: pwsh
+        run: |
+          $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if ($command) { $isccPath = $command.Source } else { $isccPath = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe' }
+          if (-not (Test-Path $isccPath)) { throw 'ISCC.exe not found' }
+          & $isccPath 'installer\GET-Passes.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup build failed' }
+          if (-not (Test-Path 'dist\installer\GET-Passes-Setup.exe')) { throw 'GET-Passes-Setup.exe not found' }
+
+      - name: Подписать установщик сертификатом из Azure Key Vault
+        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
+        shell: pwsh
+        env:
+          AZURE_SIGN_CERT_PASSWORD: ${{ secrets.AZURE_SIGN_CERT_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found' }
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:AZURE_SIGN_CERT_PASSWORD" /v 'dist\installer\GET-Passes-Setup.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Installer signing failed' }
+
+      - name: Подписать установщик обычным Windows сертификатом
+        if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
+        shell: pwsh
+        env:
+          WINDOWS_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found' }
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:WINDOWS_SIGN_CERT_PASSWORD" /v 'dist\installer\GET-Passes-Setup.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Installer signing failed' }
+
+      - name: Проверить Authenticode-подпись установщика
+        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' || env.HAS_WINDOWS_SIGNING_SECRETS == 'true' }}
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature 'dist\installer\GET-Passes-Setup.exe'
+          if ($signature.Status -ne 'Valid') {
+            throw "Invalid installer Authenticode signature: $($signature.Status) $($signature.StatusMessage)"
+          }
+
+      - name: Проверить установку и удаление Setup.exe
+        shell: pwsh
+        run: |
+          $setup = (Resolve-Path 'dist\installer\GET-Passes-Setup.exe').Path
+          $installDir = Join-Path $env:RUNNER_TEMP 'GET-Passes-installed'
+          $install = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/DIR=$installDir") -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "Installer failed: $($install.ExitCode)" }
+          $installedExe = Join-Path $installDir 'GET-Passes.exe'
+          if (-not (Test-Path $installedExe)) { throw 'Installed EXE not found' }
+          $check = Start-Process -FilePath $installedExe -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
+          if (-not $check.WaitForExit(60000)) { $check.Kill(); throw 'Installed application self-test timed out' }
+          if ($check.ExitCode -ne 0) { throw 'Installed application self-test failed' }
+          $uninstaller = Join-Path $installDir 'unins000.exe'
+          if (-not (Test-Path $uninstaller)) { throw 'unins000.exe not found' }
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -PassThru -Wait
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller failed: $($uninstall.ExitCode)" }
+          if (Test-Path $installedExe) { throw 'Installed EXE remains after uninstall' }
+
+      - name: Зафиксировать статус подписи
+        shell: pwsh
+        run: |
+          if ('${{ env.HAS_AZURE_SIGNING_SECRETS }}' -eq 'true' -or '${{ env.HAS_WINDOWS_SIGNING_SECRETS }}' -eq 'true') {
+            $status = 'SIGNED'
+          } else {
+            $status = 'UNSIGNED'
+          }
+          Set-Content -Path 'dist\SIGNING-STATUS.txt' -Value $status -Encoding utf8
+          @"
+          Автоматическая сборка .exe и Setup.exe из ветки main.
+
+          Signing status: **$status**.
+          Portable: GET-Passes-windows.zip.
+          Installer: GET-Passes-Setup.exe.
+          Python на целевом компьютере не нужен.
+          "@ | Set-Content -Path 'release-notes.md' -Encoding utf8
+
+      - name: Собрать portable ZIP
+        shell: pwsh
+        run: |
+          $out = 'dist\GET-Passes'
           New-Item -ItemType Directory -Path $out -Force | Out-Null
-          Copy-Item dist\GET-Passes.exe $out\
-          Copy-Item app_icon.ico $out\
+          Copy-Item 'dist\GET-Passes.exe' $out\
+          Copy-Item 'dist\SIGNING-STATUS.txt' $out\
+          Copy-Item 'app_icon.ico' $out\
           if (Test-Path assets) { Copy-Item assets $out\assets -Recurse }
           if (Test-Path fonts) { Copy-Item fonts $out\fonts -Recurse }
           if (Test-Path fronts) { Copy-Item fronts $out\fronts -Recurse }
-          # 7-Zip (уже есть на windows-latest) сжимает сильнее, чем
-          # Compress-Archive — LZMA2 вместо Deflate
           7z a -tzip -mx=9 GET-Passes-windows.zip "$out\*"
 
-      - name: Приложить архив к запуску (Actions Artifacts)
+      - name: Приложить артефакты к запуску
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: GET-Passes-windows
-          path: GET-Passes-windows.zip
+          path: |
+            GET-Passes-windows.zip
+            dist/installer/GET-Passes-Setup.exe
           retention-days: 90
 
       - name: Обновить релиз «Последняя сборка»
@@ -167,8 +228,7 @@ jobs:
         with:
           tag_name: latest-build
           name: Последняя сборка (${{ github.sha }})
-          body: >
-            Автоматическая сборка .exe из ветки main.
-            Скачайте GET-Passes-windows.zip, распакуйте и запустите GET-Passes.exe —
-            Python на целевом компьютере не нужен.
-          files: GET-Passes-windows.zip
+          body_path: release-notes.md
+          files: |
+            GET-Passes-windows.zip
+            dist/installer/GET-Passes-Setup.exe
