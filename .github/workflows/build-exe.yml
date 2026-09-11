@@ -25,18 +25,21 @@ jobs:
             secrets.WINDOWS_SIGN_CERT_PASSWORD != '' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Установить Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: "3.11"
+          python-version: "3.14.7"
 
       - name: Установить зависимости
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install pyinstaller
+          python -m pip install -r requirements-dev.txt
+          python -m pip install pyinstaller==6.22.2
+
+      - name: Test on Windows before packaging
+        run: python -m pytest
 
       - name: Установить UPX (доп. сжатие .exe)
         run: choco install upx -y --no-progress
@@ -67,9 +70,16 @@ jobs:
 
           python -m PyInstaller @args 'pass_generator.py'
 
+      - name: Verify packaged application
+        shell: pwsh
+        run: |
+          $check = Start-Process -FilePath 'dist\GET-Passes.exe' -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
+          if (-not $check.WaitForExit(60000)) { $check.Kill(); throw 'Smoke test timed out' }
+          if ($check.ExitCode -ne 0) { throw 'Smoke test failed' }
+
       - name: Azure login
         if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
-        uses: azure/login@v2
+        uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac # v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -107,7 +117,7 @@ jobs:
           WINDOWS_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
         run: |
           $certPath = Join-Path $env:RUNNER_TEMP "code-sign.pfx"
-          [System.Convert]::FromBase64String($env:WINDOWS_SIGN_CERT_BASE64) | Set-Content -Encoding Byte -Path $certPath
+          [System.IO.File]::WriteAllBytes($certPath, [System.Convert]::FromBase64String($env:WINDOWS_SIGN_CERT_BASE64))
 
           $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
             Where-Object { $_.FullName -match "x64" } |
@@ -145,19 +155,19 @@ jobs:
           7z a -tzip -mx=9 GET-Passes-windows.zip "$out\*"
 
       - name: Приложить архив к запуску (Actions Artifacts)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: GET-Passes-windows
           path: GET-Passes-windows.zip
           retention-days: 90
 
       - name: Обновить релиз «Последняя сборка»
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: latest-build
           name: Последняя сборка (${{ github.sha }})
           body: >
             Автоматическая сборка .exe из ветки main.
-            Скачайте GET-Passes-windows.zip, распакуйте и запустите pass_generator.exe —
+            Скачайте GET-Passes-windows.zip, распакуйте и запустите GET-Passes.exe —
             Python на целевом компьютере не нужен.
           files: GET-Passes-windows.zip

@@ -2,3 +2,6 @@
 pytest>=8.0
 pypdf>=4.0
 pyflakes>=3.0
+pytest-cov>=6.0
+pip-audit>=2.9
+bandit>=1.8

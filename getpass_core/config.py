@@ -86,6 +86,11 @@ _LEGACY_NAMES = (
 
 
 def resolve_data_dir() -> str:
+    override = os.environ.get("GET_PASSES_DATA_DIR")
+    if override:
+        path = os.path.abspath(override)
+        os.makedirs(path, exist_ok=True)
+        return path
     local_data = os.path.join(SCRIPT_DIR, "data")
     if os.path.isdir(local_data) and _is_writable(local_data):
         return local_data
@@ -187,6 +192,7 @@ def write_crash_log(err_msg: str) -> None:
 
 
 DEFAULT_SETTINGS = {
+    "draft": {},
     "last_pass_num": "001-26",
     "territory": 'ПТО "Шаврова"',
     "otb_post": "", "otb_name": "",
@@ -225,7 +231,8 @@ def load_settings() -> dict:
 
 
 def save_settings(values: dict) -> bool:
-    payload = {k: v for k, v in values.items() if k in DEFAULT_SETTINGS}
+    payload = {k: v for k, v in load_settings().items() if k in DEFAULT_SETTINGS}
+    payload.update({k: v for k, v in values.items() if k in DEFAULT_SETTINGS})
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
         tmp = CONFIG_FILE + ".tmp"

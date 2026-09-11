@@ -73,7 +73,6 @@ def build_registry_pages(records, spec: RegistrySpec, total_in_base: int,
     font_h1 = get_echoes_font(56, bold=True)
     font_h2 = get_echoes_font(36, bold=True)
     font_meta = get_echoes_font(32)
-    font_th = get_echoes_font(34, bold=True)
     font_td = get_echoes_font(32)
     font_td_bold = get_echoes_font(34, bold=True)
     font_td_plate = get_styled_font("plate", 36)

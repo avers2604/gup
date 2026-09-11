@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import getpass
 import json
 import os
 import re
@@ -220,17 +221,49 @@ class Journal:
 
     def _ensure_table(self, conn: sqlite3.Connection) -> None:
         table = self.schema.table
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", table):
+            raise ValueError("Invalid journal table")
+        conn.execute("BEGIN IMMEDIATE")
         exists = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
         ).fetchone()
         if exists:
+            present = {row[1] for row in conn.execute(f'PRAGMA table_info("{table}")')}
+            for key in self.schema.keys:
+                if key not in present:
+                    conn.execute(f'ALTER TABLE "{table}" ADD COLUMN "{key}" TEXT DEFAULT \'\'')
+            self._ensure_audit(conn)
+            conn.commit()
             return
         cols = ", ".join(f'"{k}" TEXT' for k in self.schema.keys)
         conn.execute(f'CREATE TABLE "{table}" ({cols}, PRIMARY KEY ("id"))')
         legacy = self._read_legacy_csv()
         if legacy:
             self._insert_all(conn, legacy)
+        self._ensure_audit(conn)
         conn.commit()
+
+    def _ensure_audit(self, conn):
+        conn.execute('''CREATE TABLE IF NOT EXISTS journal_events (
+            event_id INTEGER PRIMARY KEY, journal TEXT NOT NULL, record_id TEXT NOT NULL,
+            action TEXT NOT NULL, actor TEXT NOT NULL, occurred_at TEXT NOT NULL,
+            before_json TEXT NOT NULL, after_json TEXT NOT NULL)''')
+        for operation in ("UPDATE", "DELETE"):
+            conn.execute(f'''CREATE TRIGGER IF NOT EXISTS events_no_{operation.lower()}
+                BEFORE {operation} ON journal_events BEGIN
+                SELECT RAISE(ABORT, 'Journal events are immutable'); END''')
+        for key in ("status", self.schema.dup_key):
+            if key:
+                conn.execute(f'CREATE INDEX IF NOT EXISTS "{self.schema.table}_{key}" '
+                             f'ON "{self.schema.table}" ("{key}")')
+        conn.execute("PRAGMA user_version = 1")
+
+    def _event(self, conn, action, before, after):
+        conn.execute("INSERT INTO journal_events (journal, record_id, action, actor, "
+                     "occurred_at, before_json, after_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     (self.schema.table, (after or before)["id"], action, getpass.getuser(),
+                      datetime.now().astimezone().isoformat(),
+                      json.dumps(before, ensure_ascii=False), json.dumps(after, ensure_ascii=False)))
 
     def _insert_all(self, conn: sqlite3.Connection, records: list[dict]) -> None:
         cols = self.schema.keys
@@ -248,8 +281,8 @@ class Journal:
         try:
             with open(path, "r", encoding="utf-8-sig", newline="") as f:
                 rows = list(csv.reader(f, delimiter=";"))
-        except Exception:
-            return []
+        except (OSError, UnicodeError, csv.Error) as exc:
+            raise ValueError(f"Не удалось перенести старый журнал: {path}") from exc
         if len(rows) < 2:
             return []
         header, body = rows[0], rows[1:]
@@ -302,16 +335,23 @@ class Journal:
             conn.close()
 
     def append_many(self, new_records: list[dict]) -> list[dict]:
-        """Дописать пачку записей через единый вызов write()."""
-        current = self.read()
+        """Append without replacing concurrent changes in other records."""
+        records = []
         for rec in new_records:
             prepared = {k: "" for k in self.schema.keys}
             prepared.update({k: v for k, v in rec.items() if k in prepared})
             prepared["id"] = prepared.get("id") or new_id()
             prepared["status"] = prepared.get("status") or STATUS_ACTIVE
-            current.append(prepared)
-        self.write(current)
-        return current
+            records.append(prepared)
+        conn = self._connect()
+        try:
+            with conn:
+                self._insert_all(conn, records)
+                for record in records:
+                    self._event(conn, "created", {}, record)
+        finally:
+            conn.close()
+        return self.read()
 
     def delete_ids(self, ids) -> list[dict]:
         id_set = set(ids)
@@ -320,24 +360,53 @@ class Journal:
         return current
 
     def revoke_ids(self, ids, reason: str, when: str = "") -> list[dict]:
-        id_set = set(ids)
         when = when or datetime.now().strftime(DATE_FMT)
-        current = self.read()
-        for rec in current:
-            if rec.get("id") in id_set and rec.get("status") != STATUS_REVOKED:
-                rec["status"] = STATUS_REVOKED
-                rec["revoked_at"] = when
-                rec["revoke_reason"] = reason
-        self.write(current)
-        return current
+        conn = self._connect()
+        try:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                for record_id in set(ids):
+                    row = conn.execute(f'SELECT * FROM "{self.schema.table}" WHERE id=?',
+                                       (record_id,)).fetchone()
+                    if row is None or row["status"] == STATUS_REVOKED:
+                        continue
+                    before = dict(row)
+                    after = dict(before, status=STATUS_REVOKED, revoked_at=when, revoke_reason=reason)
+                    conn.execute(f'UPDATE "{self.schema.table}" SET status=?, revoked_at=?, '
+                                 'revoke_reason=? WHERE id=?', (STATUS_REVOKED, when, reason, record_id))
+                    self._event(conn, "revoked", before, after)
+        finally:
+            conn.close()
+        return self.read()
 
-    def update_record(self, rec_id: str, values: dict) -> list[dict]:
-        current = self.read()
-        for rec in current:
-            if rec.get("id") == rec_id:
-                rec.update({k: v for k, v in values.items() if k in rec})
-        self.write(current)
-        return current
+    def update_record(self, rec_id: str, values: dict, expected=None) -> list[dict]:
+        protected = {"id", "status", "revoked_at", "revoke_reason"}
+        values = {k: v for k, v in values.items() if k in self.schema.keys and k not in protected}
+        conn = self._connect()
+        try:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(f'SELECT * FROM "{self.schema.table}" WHERE id=?', (rec_id,)).fetchone()
+                if row is None:
+                    raise ValueError("Запись больше не существует")
+                before = dict(row)
+                if expected is not None and before != expected:
+                    raise ValueError("Запись изменена в другом окне. Откройте её заново.")
+                after = dict(before, **values)
+                issue, valid = parse_date(after.get("issue_date")), parse_date(after.get("valid_until"))
+                for key in ("issue_date", "valid_until"):
+                    if after.get(key) and parse_date(after[key]) is None:
+                        raise ValueError("Некорректная дата: используйте ДД.ММ.ГГГГ")
+                if issue and valid and valid < issue:
+                    raise ValueError("Окончание срока раньше даты выдачи")
+                if values:
+                    assignments = ', '.join(f'"{key}"=?' for key in values)
+                    conn.execute(f'UPDATE "{self.schema.table}" SET {assignments} WHERE id=?',
+                                 (*values.values(), rec_id))
+                    self._event(conn, "updated", before, after)
+        finally:
+            conn.close()
+        return self.read()
 
     def active(self, records=None, today=None):
         records = self.read() if records is None else records
@@ -449,7 +518,8 @@ def export_journal(journal, filepath: str) -> int:
             with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
                 writer = csv.writer(f, delimiter=";")
                 writer.writerow(schema.header)
-                writer.writerows(rows)
+                writer.writerows([["'" + str(v) if str(v).lstrip().startswith(("=", "+", "-", "@"))
+                                   else v for v in row] for row in rows])
         except PermissionError as exc:
             raise FileBusy(filepath) from exc
     else:

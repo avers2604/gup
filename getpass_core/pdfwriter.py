@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import zlib
+from .atomic import atomic_output
 
 _HEADER = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"
 
@@ -44,6 +45,11 @@ def _encode_page(image, quality: int):
 
 
 def write_pdf(pages, filepath: str, dpi: int = 300, quality: int = 88) -> int:
+    with atomic_output(filepath) as temporary:
+        return _write_pdf(pages, temporary, dpi, quality)
+
+
+def _write_pdf(pages, filepath, dpi, quality):
     page_refs: list[int] = []
     next_num = 3
     count = 0

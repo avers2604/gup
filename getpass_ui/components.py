@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import tkinter as tk
+import re
 from tkinter import ttk
 
 from PIL import ImageTk
 
 from getpass_core.blank import load_logo, load_logo_knockout
-from getpass_core.domain import format_phone, phone_digits
+from getpass_core.domain import format_phone
 
 from .theme import Theme, field_label, status_dot
 
@@ -57,7 +58,9 @@ class Field(tk.Frame):
     @staticmethod
     def _valid_phone_input(proposed):
         allowed = set("0123456789+()- ")
-        return all(char in allowed for char in proposed) and len(phone_digits(proposed)) <= 10
+        digits = re.sub(r"\D", "", proposed)
+        maximum = 11 if proposed.strip().startswith(("+7", "8")) else 10
+        return all(char in allowed for char in proposed) and len(digits) <= maximum
 
     def _format_phone_input(self, _event=None):
         if getattr(self, "_formatting", False):
@@ -108,8 +111,12 @@ class Field(tk.Frame):
     def validate(self) -> bool:
         if self._required and not self.get().strip():
             self.widget.state(["invalid"])
+            self._label_widget.config(text=f"{self._base_text.upper()} — заполните поле",
+                                      fg=self.theme.c("danger"))
             return False
         self.widget.state(["!invalid"])
+        self._label_widget.config(text=self._base_text.upper() + (" *" if self._required else ""),
+                                  fg=self.theme.c("ink_muted"))
         return True
 
     def reset_validation(self):

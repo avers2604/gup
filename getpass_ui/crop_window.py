@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 import tkinter as tk
 from datetime import datetime
 from tkinter import filedialog, messagebox
@@ -171,7 +172,7 @@ class CropWindow:
         for i in (1, 2):
             self.c.create_line(fx + i * fw / 3, fy, fx + i * fw / 3, fy + fh,
                                fill="#FFFFFF", width=1, tags="frame")
-            self.c.create_line(fx, fy + i * fw / 3, fx + fw, fy + i * fh / 3,
+            self.c.create_line(fx, fy + i * fh / 3, fx + fw, fy + i * fh / 3,
                                fill="#FFFFFF", width=1, tags="frame")
         self._draw_face_guide(fx, fy, fw, fh)
         self.c.create_text(self.canvas_w // 2, max(14, fy - 18),
@@ -261,7 +262,7 @@ def store_photo(cropped, photo_dir, tab_num=""):
     os.makedirs(photo_dir, exist_ok=True)
     safe = "".join(ch for ch in (tab_num or "") if ch.isalnum()) or "photo"
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(photo_dir, f"{safe}_{stamp}.jpg")
+    path = os.path.join(photo_dir, f"{safe}_{stamp}_{uuid.uuid4().hex}.jpg")
     if cropped.mode != "RGB":
         cropped = cropped.convert("RGB")
     cropped.save(path, "JPEG", quality=95, dpi=(300, 300))

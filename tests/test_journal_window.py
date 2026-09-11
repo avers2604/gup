@@ -5,7 +5,7 @@ import pytest
 
 tkinter = pytest.importorskip("tkinter")
 
-needs_display = pytest.mark.skipif(not os.environ.get("DISPLAY"),
+needs_display = pytest.mark.skipif(os.name != "nt" and not os.environ.get("DISPLAY"),
                                    reason="нужен X-сервер")
 
 

@@ -70,7 +70,7 @@ class TestOperations:
         monkeypatch.setattr(journal, "write", lambda recs: (calls.append(1), original(recs))[1])
         journal.append_many([{"num": f"{i:03d}-26", "plate": f"А{i:03d}АА78"}
                              for i in range(50)])
-        assert len(calls) == 1               # раньше здесь было 50 перезаписей
+        assert len(calls) == 0               # append must never rewrite the table
         assert len(journal.read()) == 50
 
     def test_delete_by_id_survives_external_edit(self, journal):

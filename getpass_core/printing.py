@@ -8,6 +8,7 @@ import tempfile
 from PIL import Image
 
 from .pdfwriter import write_pdf
+from .atomic import atomic_output
 
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 DEFAULT_PRINTER = "По умолчанию"
@@ -129,10 +130,10 @@ def _send_duplex_job(front_image, back_image, printer_name=None) -> tuple[bool, 
             f"$doc.PrinterSettings.Duplex = [System.Drawing.Printing.Duplex]::{duplex_mode}; "
             f"$imgs = @([System.Drawing.Image]::FromFile('{_ps_quote(temp_front)}'), "
             f"[System.Drawing.Image]::FromFile('{_ps_quote(temp_back)}')); "
-            "$idx = 0; "
+            "$pageState = @{ Index = 0 }; "
             "$doc.add_PrintPage({ "
             "  param($s, $e) "
-            "  $img = $imgs[$idx]; "
+            "  $img = $imgs[$pageState.Index]; "
             "  $e.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic; "
             "  $pb = $e.PageBounds; "
             "  $ratio = $img.Width / $img.Height; "
@@ -145,8 +146,8 @@ def _send_duplex_job(front_image, back_image, printer_name=None) -> tuple[bool, 
             "  } "
             "  $destRect = New-Object System.Drawing.RectangleF($x, $y, $w, $h); "
             "  $e.Graphics.DrawImage($img, $destRect); "
-            "  $idx += 1; "
-            "  $e.HasMorePages = ($idx -lt $imgs.Count); "
+            "  $pageState.Index += 1; "
+            "  $e.HasMorePages = ($pageState.Index -lt $imgs.Count); "
             "}); "
             "try { $doc.Print() } finally { foreach ($i in $imgs) { $i.Dispose() }; $doc.Dispose() }"
         )
@@ -179,6 +180,11 @@ def print_pass_two_sided(front_image, back_image, printer_name=None,
 
 
 def save_document(image: Image.Image, filepath: str) -> None:
+    with atomic_output(filepath) as temporary:
+        _save_document(image, temporary)
+
+
+def _save_document(image, filepath):
     ext = os.path.splitext(filepath)[1].lower()
     if ext in (".jpg", ".jpeg"):
         # Предотвращение падения "cannot write mode RGBA as JPEG"
