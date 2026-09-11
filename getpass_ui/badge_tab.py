@@ -380,11 +380,25 @@ class BadgePanel:
             initialfile=f"{prefix}.pdf")
         if not path:
             return
+        operation_id = None
         try:
-            self._issuance_id = issuance.prepare(BADGE_JOURNAL, [data], path)
+            operation_id = issuance.prepare(BADGE_JOURNAL, [data], path)
+            self._issuance_id = operation_id
             printing.save_document(document, path)
         except Exception as exc:
-            messagebox.showerror("Ошибка", f"Не удалось сохранить файл:\n{exc}")
+            recovery_note = ""
+            if operation_id is not None:
+                try:
+                    issuance.cancel(BADGE_JOURNAL, operation_id)
+                    self._issuance_id = None
+                except Exception as cancel_exc:
+                    recovery_note = (
+                        "\n\nОперация осталась в «Незавершённых выдачах»: "
+                        f"{cancel_exc}"
+                    )
+            messagebox.showerror(
+                "Ошибка", f"Не удалось сохранить файл:\n{exc}{recovery_note}"
+            )
             return
         nxt = self._finish(data)
         if nxt is None:
