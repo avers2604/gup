@@ -62,4 +62,4 @@ jobs:
     - name: Dependency audit
       run: python -m pip_audit -r requirements.txt
     - name: Security analysis
-      run: python -m bandit -r getpass_core getpass_ui -lll
+      run: python -m bandit -r getpass_core getpass_ui -ll
