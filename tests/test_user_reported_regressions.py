@@ -26,6 +26,14 @@ class _VarStub:
         return self.value
 
 
+class _RestoreSpy:
+    def __init__(self):
+        self.calls = []
+
+    def restore(self, data):
+        self.calls.append(data)
+
+
 def test_pass_autocomplete_reuses_only_vehicle_fields(monkeypatch):
     """История госномера не должна переносить персональные данные старого пропуска."""
     from getpass_ui import pass_tab
@@ -66,6 +74,27 @@ def test_pass_autocomplete_reuses_only_vehicle_fields(monkeypatch):
     assert form.d_phone.get() == ""
     assert form.territory.get() == ""
     assert changes == [True]
+
+
+def test_pass_drafts_are_not_restored_on_startup():
+    """Старые черновики ТС не должны автоматически попадать в оба новых пропуска."""
+    from getpass_ui.app import App
+
+    app = App.__new__(App)
+    app.settings = {
+        "draft": {
+            "p1": {"plate": "А111АА78", "d_fio": "Старый водитель 1"},
+            "p2": {"plate": "В222ВВ78", "d_fio": "Старый водитель 2"},
+            "badge": {},
+        }
+    }
+    app.p1 = _RestoreSpy()
+    app.p2 = _RestoreSpy()
+
+    app._restore_draft_state()
+
+    assert app.p1.calls == []
+    assert app.p2.calls == []
 
 
 def test_otb_signature_captions_are_close_to_the_line(monkeypatch):
