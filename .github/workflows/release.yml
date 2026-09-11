@@ -1,0 +1,213 @@
+name: Stable Windows release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      HAS_AZURE_SIGNING_SECRETS: >-
+        ${{ secrets.AZURE_CLIENT_ID != '' &&
+            secrets.AZURE_TENANT_ID != '' &&
+            secrets.AZURE_SUBSCRIPTION_ID != '' &&
+            secrets.AZURE_KEY_VAULT_NAME != '' &&
+            secrets.AZURE_SIGN_CERT_NAME != '' &&
+            secrets.AZURE_SIGN_CERT_PASSWORD != '' }}
+      HAS_WINDOWS_SIGNING_SECRETS: >-
+        ${{ secrets.WINDOWS_SIGN_CERT_BASE64 != '' &&
+            secrets.WINDOWS_SIGN_CERT_PASSWORD != '' }}
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14.7"
+
+      - name: Verify tag matches pyproject.toml
+        shell: pwsh
+        run: |
+          $match = Select-String -Path 'pyproject.toml' -Pattern '^version = "([^"]+)"$'
+          if (-not $match) { throw 'Project version not found in pyproject.toml' }
+          $version = $match.Matches[0].Groups[1].Value
+          $expectedTag = "v$version"
+          if ($env:RELEASE_TAG -ne $expectedTag) {
+            throw "Tag $env:RELEASE_TAG does not match project version $expectedTag"
+          }
+
+      - name: Require trusted signing for stable release
+        shell: pwsh
+        run: |
+          if ('${{ env.HAS_AZURE_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_WINDOWS_SIGNING_SECRETS }}' -ne 'true') {
+            throw 'Stable release requires trusted Authenticode signing secrets. See docs/SIGNING.md.'
+          }
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install pyinstaller==6.22.2
+          choco install innosetup upx -y --no-progress
+
+      - name: Run full Windows tests
+        run: python -m pytest
+
+      - name: Build application EXE
+        shell: pwsh
+        run: |
+          $args = @(
+            '--noconfirm', '--clean', '--onefile', '--windowed',
+            '--icon', 'app_icon.ico', '--name', 'GET-Passes'
+          )
+          if (Test-Path 'assets') { $args += @('--add-data', 'assets;assets') }
+          if (Test-Path 'fonts') { $args += @('--add-data', 'fonts;fonts') }
+          if (Test-Path 'fronts') { $args += @('--add-data', 'fronts;fronts') }
+          if (Test-Path 'app_icon.ico') { $args += @('--add-data', 'app_icon.ico;.') }
+          python -m PyInstaller @args 'pass_generator.py'
+
+      - name: Self-test packaged EXE before signing
+        shell: pwsh
+        run: |
+          $check = Start-Process -FilePath 'dist\GET-Passes.exe' -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
+          if (-not $check.WaitForExit(60000)) { $check.Kill(); throw 'Smoke test timed out' }
+          if ($check.ExitCode -ne 0) { throw 'Smoke test failed' }
+
+      - name: Azure login
+        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
+        uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac # v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign EXE with Azure certificate
+        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
+        shell: pwsh
+        env:
+          AZURE_KEY_VAULT_NAME: ${{ secrets.AZURE_KEY_VAULT_NAME }}
+          AZURE_SIGN_CERT_NAME: ${{ secrets.AZURE_SIGN_CERT_NAME }}
+          AZURE_SIGN_CERT_PASSWORD: ${{ secrets.AZURE_SIGN_CERT_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          az keyvault secret download --vault-name "$env:AZURE_KEY_VAULT_NAME" --name "$env:AZURE_SIGN_CERT_NAME" --file "$pfxPath" --encoding base64
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found' }
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:AZURE_SIGN_CERT_PASSWORD" /v 'dist\GET-Passes.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'EXE signing failed' }
+
+      - name: Sign EXE with PFX certificate
+        if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
+        shell: pwsh
+        env:
+          WINDOWS_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_SIGN_CERT_BASE64 }}
+          WINDOWS_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          [System.IO.File]::WriteAllBytes($pfxPath, [System.Convert]::FromBase64String($env:WINDOWS_SIGN_CERT_BASE64))
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found' }
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:WINDOWS_SIGN_CERT_PASSWORD" /v 'dist\GET-Passes.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'EXE signing failed' }
+
+      - name: Verify signed application EXE
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature 'dist\GET-Passes.exe'
+          if ($signature.Status -ne 'Valid') { throw "Invalid EXE signature: $($signature.Status)" }
+
+      - name: Build Inno Setup installer
+        shell: pwsh
+        run: |
+          $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if ($command) { $isccPath = $command.Source } else { $isccPath = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe' }
+          if (-not (Test-Path $isccPath)) { throw 'ISCC.exe not found' }
+          & $isccPath 'installer\GET-Passes.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup build failed' }
+
+      - name: Sign installer with Azure certificate
+        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
+        shell: pwsh
+        env:
+          AZURE_SIGN_CERT_PASSWORD: ${{ secrets.AZURE_SIGN_CERT_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found' }
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:AZURE_SIGN_CERT_PASSWORD" /v 'dist\installer\GET-Passes-Setup.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Installer signing failed' }
+
+      - name: Sign installer with PFX certificate
+        if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
+        shell: pwsh
+        env:
+          WINDOWS_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found' }
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:WINDOWS_SIGN_CERT_PASSWORD" /v 'dist\installer\GET-Passes-Setup.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Installer signing failed' }
+
+      - name: Verify signed installer
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature 'dist\installer\GET-Passes-Setup.exe'
+          if ($signature.Status -ne 'Valid') { throw "Invalid installer signature: $($signature.Status)" }
+
+      - name: Install, self-test and uninstall stable installer
+        shell: pwsh
+        run: |
+          $setup = (Resolve-Path 'dist\installer\GET-Passes-Setup.exe').Path
+          $installDir = Join-Path $env:RUNNER_TEMP 'GET-Passes-stable'
+          $install = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/DIR=$installDir") -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "Installer failed: $($install.ExitCode)" }
+          $installedExe = Join-Path $installDir 'GET-Passes.exe'
+          $check = Start-Process -FilePath $installedExe -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
+          if (-not $check.WaitForExit(60000)) { $check.Kill(); throw 'Installed self-test timed out' }
+          if ($check.ExitCode -ne 0) { throw 'Installed self-test failed' }
+          $uninstaller = Join-Path $installDir 'unins000.exe'
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -PassThru -Wait
+          if ($uninstall.ExitCode -ne 0) { throw 'Uninstall failed' }
+
+      - name: Build portable ZIP and checksums
+        shell: pwsh
+        run: |
+          $out = 'dist\GET-Passes'
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          Copy-Item 'dist\GET-Passes.exe' $out\
+          Copy-Item 'app_icon.ico' $out\
+          if (Test-Path assets) { Copy-Item assets $out\assets -Recurse }
+          if (Test-Path fonts) { Copy-Item fonts $out\fonts -Recurse }
+          if (Test-Path fronts) { Copy-Item fronts $out\fronts -Recurse }
+          7z a -tzip -mx=9 GET-Passes-windows.zip "$out\*"
+          $zipHash = (Get-FileHash 'GET-Passes-windows.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          $setupHash = (Get-FileHash 'dist\installer\GET-Passes-Setup.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          @(
+            "$zipHash  GET-Passes-windows.zip",
+            "$setupHash  GET-Passes-Setup.exe"
+          ) | Set-Content 'SHA256SUMS.txt' -Encoding ascii
+
+      - name: Publish stable release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          name: GET-Passes ${{ github.ref_name }}
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            GET-Passes-windows.zip
+            dist/installer/GET-Passes-Setup.exe
+            SHA256SUMS.txt
