@@ -85,41 +85,60 @@ _LEGACY_NAMES = (
 )
 
 
-def resolve_data_dir() -> str:
-    override = os.environ.get("GET_PASSES_DATA_DIR")
-    if override:
-        path = os.path.abspath(override)
-        os.makedirs(path, exist_ok=True)
-        return path
-    local_data = os.path.join(SCRIPT_DIR, "data")
-    if os.path.isdir(local_data) and _is_writable(local_data):
+def _legacy_data_present() -> bool:
+    return any(os.path.exists(os.path.join(SCRIPT_DIR, name)) for name in _LEGACY_NAMES)
+
+
+def _make_local_data_dir(local_data: str) -> str | None:
+    try:
+        os.makedirs(local_data, exist_ok=True)
         return local_data
+    except Exception:
+        return None
 
-    legacy_present = any(os.path.exists(os.path.join(SCRIPT_DIR, n)) for n in _LEGACY_NAMES)
-    if legacy_present and _is_writable(SCRIPT_DIR):
-        return SCRIPT_DIR
 
-    if _is_writable(SCRIPT_DIR) and not legacy_present:
+def _copy_legacy_data(user_dir: str) -> None:
+    for name in _LEGACY_NAMES:
+        src = os.path.join(SCRIPT_DIR, name)
+        dst = os.path.join(user_dir, name)
+        if not os.path.exists(src) or os.path.exists(dst):
+            continue
         try:
-            os.makedirs(local_data, exist_ok=True)
-            return local_data
+            shutil.copy2(src, dst)
         except Exception:
             pass
 
+
+def _resolve_user_data_dir(legacy_present: bool) -> str:
     user_dir = _user_data_dir()
     try:
         os.makedirs(user_dir, exist_ok=True)
     except Exception:
         return SCRIPT_DIR
     if legacy_present:
-        for n in _LEGACY_NAMES:
-            src, dst = os.path.join(SCRIPT_DIR, n), os.path.join(user_dir, n)
-            if os.path.exists(src) and not os.path.exists(dst):
-                try:
-                    shutil.copy2(src, dst)
-                except Exception:
-                    pass
+        _copy_legacy_data(user_dir)
     return user_dir
+
+
+def resolve_data_dir() -> str:
+    override = os.environ.get("GET_PASSES_DATA_DIR")
+    if override:
+        path = os.path.abspath(override)
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    local_data = os.path.join(SCRIPT_DIR, "data")
+    if os.path.isdir(local_data) and _is_writable(local_data):
+        return local_data
+
+    legacy_present = _legacy_data_present()
+    if legacy_present and _is_writable(SCRIPT_DIR):
+        return SCRIPT_DIR
+    if _is_writable(SCRIPT_DIR) and not legacy_present:
+        created = _make_local_data_dir(local_data)
+        if created:
+            return created
+    return _resolve_user_data_dir(legacy_present)
 
 
 DATA_DIR = resolve_data_dir()
