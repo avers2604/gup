@@ -69,46 +69,75 @@ ECHOES_NAMES_BOLD = [
 BRAND_TOKENS = ("echoes", "moscowsans", "moscow sans")
 
 
+def _echoes_search_dirs() -> list[str]:
+    directories = [config.SCRIPT_DIR, config.FONTS_DIR]
+    if os.name != "nt":
+        return directories
+    windir = os.environ.get("WINDIR", r"C:\Windows")
+    directories.append(os.path.join(windir, "Fonts"))
+    local = os.environ.get("LOCALAPPDATA", "")
+    if local:
+        directories.append(os.path.join(local, "Microsoft", "Windows", "Fonts"))
+    return directories
+
+
+def _font_files(directory: str) -> list[str]:
+    if not directory or not os.path.isdir(directory):
+        return []
+    try:
+        return os.listdir(directory)
+    except Exception:
+        return []
+
+
+def _named_font(directory: str, low_map: dict[str, str], candidates) -> str | None:
+    for name in candidates:
+        actual = low_map.get(name)
+        if actual:
+            return os.path.join(directory, actual)
+    return None
+
+
+def _heuristic_brand_fonts(directory: str, files: list[str]) -> tuple[str | None, str | None]:
+    regular = None
+    bold = None
+    for filename in files:
+        lowered = filename.lower()
+        is_brand = any(token in lowered for token in BRAND_TOKENS)
+        if not is_brand or not lowered.endswith((".ttf", ".otf")):
+            continue
+        path = os.path.join(directory, filename)
+        is_bold = any(token in lowered for token in ("bold", "semibold", "-sb", "_sb"))
+        if is_bold and bold is None:
+            bold = path
+        elif not is_bold and regular is None:
+            regular = path
+    return regular, bold
+
+
+def _scan_echoes_directory(directory: str) -> tuple[str | None, str | None]:
+    files = _font_files(directory)
+    if not files:
+        return None, None
+    low_map = {filename.lower(): filename for filename in files}
+    regular = _named_font(directory, low_map, ECHOES_NAMES_REG)
+    bold = _named_font(directory, low_map, ECHOES_NAMES_BOLD)
+    heuristic_regular, heuristic_bold = _heuristic_brand_fonts(directory, files)
+    return regular or heuristic_regular, bold or heuristic_bold
+
+
 def find_echoes_font() -> None:
     global _ECHOES_REGULAR, _ECHOES_BOLD, _ECHOES_FOUND
     if _ECHOES_FOUND:
         return
     _ECHOES_FOUND = True
 
-    search_dirs = [config.SCRIPT_DIR, config.FONTS_DIR]
-    if os.name == "nt":
-        windir = os.environ.get("WINDIR", r"C:\Windows")
-        search_dirs.append(os.path.join(windir, "Fonts"))
-        local = os.environ.get("LOCALAPPDATA", "")
-        if local:
-            search_dirs.append(os.path.join(local, "Microsoft", "Windows", "Fonts"))
-
-    for d in search_dirs:
-        if not d or not os.path.isdir(d):
-            continue
-        try:
-            files = os.listdir(d)
-        except Exception:
-            continue
-        low_map = {f.lower(): f for f in files}
-
-        for name in ECHOES_NAMES_REG:
-            if name in low_map and _ECHOES_REGULAR is None:
-                _ECHOES_REGULAR = os.path.join(d, low_map[name])
-        for name in ECHOES_NAMES_BOLD:
-            if name in low_map and _ECHOES_BOLD is None:
-                _ECHOES_BOLD = os.path.join(d, low_map[name])
-
-        for f in files:
-            fl = f.lower()
-            if any(tok in fl for tok in BRAND_TOKENS) and fl.endswith((".ttf", ".otf")):
-                full = os.path.join(d, f)
-                is_bold = any(k in fl for k in ("bold", "semibold", "-sb", "_sb"))
-                if is_bold and _ECHOES_BOLD is None:
-                    _ECHOES_BOLD = full
-                elif not is_bold and _ECHOES_REGULAR is None:
-                    _ECHOES_REGULAR = full
-
+    for directory in _echoes_search_dirs():
+        regular, bold = _scan_echoes_directory(directory)
+        if _ECHOES_REGULAR is None and regular:
+            _ECHOES_REGULAR = regular
+        if _ECHOES_BOLD is None and bold:
+            _ECHOES_BOLD = bold
         if _ECHOES_REGULAR and _ECHOES_BOLD:
             break
 
