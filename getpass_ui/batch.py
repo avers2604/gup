@@ -9,8 +9,10 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import ImageDraw
 
 from getpass_core import render as R
+from getpass_core import issuance
 from getpass_core.printing import save_pdf_pages
 from getpass_core.storage import FileBusy
+from getpass_core.importing import photo_in_folder, validate_items
 
 from .components import section_title
 from .theme import Card
@@ -73,61 +75,53 @@ def read_csv_rows(title):
 
 def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
               log_records, default_name):
+    if not review_import(parent, theme, items, journal):
+        return False
     save_path = filedialog.asksaveasfilename(defaultextension=".pdf",
                                              filetypes=[("PDF", "*.pdf")],
                                              initialfile=default_name)
     if not save_path:
         return False
 
-    cancelled = {"flag": False}
+    class Cancelled(Exception):
+        pass
 
     def pages():
         with ProgressDialog(parent, theme, title, pages_total) as dlg:
             for idx, page in enumerate(page_builder(), start=1):
                 if dlg.cancelled:
-                    cancelled["flag"] = True
-                    return
+                    raise Cancelled()
                 dlg.step(idx, f"Готовится лист {idx} из {pages_total}...")
+                if dlg.cancelled:
+                    raise Cancelled()
                 yield page
 
     try:
+        operation_id = issuance.prepare(journal, log_records, save_path)
         save_pdf_pages(pages(), save_path)
+    except Cancelled:
+        messagebox.showinfo("Отменено", "Массовая печать прервана. Прежний файл сохранён.", parent=parent)
+        return False
     except ValueError:
-        if cancelled["flag"]:
-            if os.path.exists(save_path):
-                try:
-                    os.remove(save_path)
-                except Exception:
-                    pass
-            messagebox.showinfo("Отменено", "Массовая печать прервана.", parent=parent)
-            return False
         messagebox.showwarning("Пусто", "Нечего печатать.", parent=parent)
         return False
     except Exception as exc:
         messagebox.showerror("Ошибка", f"Не удалось сохранить PDF:\n{exc}", parent=parent)
         return False
 
-    if cancelled["flag"]:
-        if os.path.exists(save_path):
-            try:
-                os.remove(save_path)
-            except Exception:
-                pass
-        messagebox.showinfo("Отменено",
-                            "Печать прервана. В журнал ничего не записано.", parent=parent)
-        return False
-
     try:
-        journal.append_many(log_records)
+        issuance.confirm(journal, operation_id)
     except FileBusy as exc:
         messagebox.showerror(
             "Журнал не обновлён",
             f"PDF сохранён, но «{os.path.basename(exc.path)}» занят другой программой.\n"
             f"Закройте его и повторите — записи ({len(log_records)} шт.) не попали в журнал.",
             parent=parent)
+        return False
     except Exception as exc:
         messagebox.showerror("Журнал не обновлён",
                              f"PDF сохранён, но журнал не записан:\n{exc}", parent=parent)
+        return False
 
     if messagebox.askyesno("Готово", f"Обработано записей: {len(items)}.\n\nОткрыть файл?",
                            parent=parent):
@@ -136,6 +130,45 @@ def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
         except Exception:
             pass
     return True
+
+
+def review_import(parent, theme, items, journal):
+    results = validate_items(items, journal, badge="tab_num" in journal.schema.keys)
+    win = theme.toplevel(parent, "Проверка импорта")
+    win.geometry("1000x600")
+    win.transient(parent)
+    win.grab_set()
+    errors = sum(bool(e) for _, e, _ in results)
+    warnings = sum(bool(w) for _, _, w in results)
+    ttk.Label(win, text=f"Записей: {len(items)} · С ошибками: {errors} · Предупреждений: {warnings}").pack(pady=12)
+    tree = ttk.Treeview(win, columns=("row", "number", "person", "result"), show="headings")
+    for key, title, width in (("row", "Строка", 60), ("number", "Номер", 120),
+                              ("person", "Сотрудник / водитель", 220), ("result", "Проверка", 450)):
+        tree.heading(key, text=title)
+        tree.column(key, width=width)
+    scroll = ttk.Scrollbar(win, command=tree.yview)
+    tree.configure(yscrollcommand=scroll.set)
+    scroll.pack(side="right", fill="y")
+    tree.pack(fill="both", expand=True, padx=12)
+    tree.tag_configure("error", foreground=theme.c("danger"))
+    for item, (row, err, warn) in zip(items, results):
+        tree.insert("", "end", values=(row, item.get("tab_num", item.get("plate", "")),
+                    item.get("fio", item.get("driver_full", "")), "; ".join(err + warn) or "Готово"),
+                    tags=("error",) if err else ())
+    accepted = [False]
+    def proceed():
+        if warnings and not messagebox.askyesno("Подтвердить предупреждения",
+                "Есть совпадения с журналом или чёрным списком. Продолжить выдачу?", parent=win):
+            return
+        accepted[0] = True
+        win.destroy()
+    bar = ttk.Frame(win)
+    bar.pack(fill="x", padx=12, pady=12)
+    ttk.Button(bar, text="Вернуться и исправить CSV", command=win.destroy).pack(side="left")
+    ttk.Button(bar, text="Сформировать PDF", command=proceed,
+               state="disabled" if errors else "normal").pack(side="right")
+    parent.wait_window(win)
+    return accepted[0]
 
 
 def parse_pass_rows(rows, common):
@@ -164,7 +197,7 @@ def parse_badge_rows(rows, folder, defaults):
         def cell(i, default=""):
             return r[i].strip() if len(r) > i else default
         photo = cell(7)
-        photo_path = os.path.join(folder, photo) if photo else ""
+        photo_path = photo_in_folder(folder, photo)
         if not os.path.exists(photo_path):
             photo_path = ""
         sur, nam, pat = cell(1), cell(2), cell(3)

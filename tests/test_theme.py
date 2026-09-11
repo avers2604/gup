@@ -6,7 +6,7 @@ from getpass_ui import tokens as T
 tkinter = pytest.importorskip("tkinter")
 import os  # noqa: E402
 
-needs_display = pytest.mark.skipif(not os.environ.get("DISPLAY"),
+needs_display = pytest.mark.skipif(os.name != "nt" and not os.environ.get("DISPLAY"),
                                    reason="нужен X-сервер")
 
 

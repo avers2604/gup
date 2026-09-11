@@ -162,6 +162,16 @@ class PassForm:
         self.num.delete(0, tk.END)
         self.num.insert(0, value)
 
+    def restore(self, data):
+        self.set_number(data.get("num", self.get_number()))
+        self.plate_var.set(data.get("plate", ""))
+        for key in ("brand", "model", "type", "color", "d_pos", "d_fio"):
+            field = getattr(self, key)
+            field.delete(0, tk.END)
+            field.insert(0, data.get(key, ""))
+        self.d_phone.set(data.get("phone", ""))
+        self.territory.set(data.get("territory", ""))
+
     def get_number(self):
         return self.num.get().strip()
 

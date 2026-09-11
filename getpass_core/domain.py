@@ -96,9 +96,7 @@ def plate_key(plate_raw: str | None) -> str:
 def phone_digits(value: str | None) -> str:
     """Вернуть до десяти цифр российского номера без кода страны."""
     digits = re.sub(r"\D", "", value or "")
-    if digits.startswith("8"):
-        digits = digits[1:]
-    elif digits.startswith("7"):
+    if len(digits) == 11 and digits.startswith(("7", "8")) or (value or "").strip().startswith("+7"):
         digits = digits[1:]
     return digits[:10]
 

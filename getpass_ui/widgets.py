@@ -123,7 +123,7 @@ class ProgressDialog:
         if text:
             self._label.config(text=text)
         try:
-            self.win.update_idletasks()
+            self.win.update()
         except Exception:
             pass
 
