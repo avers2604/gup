@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import partial
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -68,6 +68,11 @@ class VehiclePassPage(QWidget):
         root.setSpacing(18)
         root.addWidget(self._build_form_panel(), 3)
         root.addWidget(self._build_preview_panel(), 2)
+
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(150)
+        self._preview_timer.timeout.connect(self._refresh_current_preview)
 
         self._connect_viewmodel()
         self._sync_state(self._viewmodel.state)
@@ -244,7 +249,7 @@ class VehiclePassPage(QWidget):
 
     def _state_changed(self, state) -> None:
         self._sync_state(state)
-        self._refresh_current_preview()
+        self._preview_timer.start()
 
     def _sync_state(self, state) -> None:
         for slot in ("first", "second"):
@@ -299,6 +304,7 @@ class VehiclePassPage(QWidget):
             self.preview_target.setCurrentIndex(index)
 
     def _preview_target_changed(self) -> None:
+        self._preview_timer.stop()
         self._refresh_current_preview()
 
     def _refresh_current_preview(self) -> None:
