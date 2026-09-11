@@ -31,12 +31,12 @@ jobs:
       with:
         python-version: ${{ matrix.python }}
 
-    # Xvfb и библиотеки Tk нужны, чтобы прогонять проверки интерфейса
-    # без монитора: именно они ловят «форма построилась, но не видна».
+    # Xvfb/Tk сохраняют проверки legacy UI; libEGL нужен PySide6/QtGui
+    # даже при offscreen-платформе на Linux runner.
     - name: Install system packages for headless GUI tests
       run: |
         sudo apt-get update -qq
-        sudo apt-get install -y --no-install-recommends xvfb tk
+        sudo apt-get install -y --no-install-recommends xvfb tk libegl1
 
     - name: Install dependencies
       run: |
