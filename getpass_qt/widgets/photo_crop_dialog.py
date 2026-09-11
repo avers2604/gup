@@ -19,6 +19,13 @@ from getpass_design.tokens import BRAND, LIGHT
 MIN_SCALE = 1.0
 MAX_SCALE = 6.0
 _DEFAULT_CANVAS = (560, 560)
+_EXIF_ORIENTATION = 274
+
+
+def _normalized_source(image):
+    orientation = image.getexif().get(_EXIF_ORIENTATION, 1)
+    source = ImageOps.exif_transpose(image) if orientation != 1 else image
+    return source if source.mode == "RGB" else source.convert("RGB")
 
 
 class _CropCanvas(QWidget):
@@ -119,7 +126,7 @@ class PhotoCropDialog(QDialog):
         self.setWindowTitle("Кадрирование фотографии 3:4")
         self.resize(680, 760)
 
-        self.source_image = ImageOps.exif_transpose(image).convert("RGB")
+        self.source_image = _normalized_source(image)
         self.orig_w, self.orig_h = self.source_image.size
         self.canvas_size = _DEFAULT_CANVAS
         self.frame_box = self._frame_for_canvas(*self.canvas_size)
@@ -205,12 +212,11 @@ class PhotoCropDialog(QDialog):
 
     @staticmethod
     def _frame_for_canvas(width: int, height: int) -> tuple[int, int, int, int]:
-        frame_h = max(1, round(height * 0.82))
-        frame_w = max(1, round(frame_h * 3 / 4))
-        max_width = max(1, round(width * 0.88))
-        if frame_w > max_width:
-            frame_w = max_width
-            frame_h = max(1, round(frame_w * 4 / 3))
+        max_h_units = max(1, round(height * 0.82 / 4))
+        max_w_units = max(1, round(width * 0.88 / 3))
+        units = min(max_h_units, max_w_units)
+        frame_w = units * 3
+        frame_h = units * 4
         return (
             (width - frame_w) // 2,
             (height - frame_h) // 2,
