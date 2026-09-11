@@ -18,12 +18,22 @@ _OWNED_PHOTO_KEY = "_issuance_owned_photo"
 logger = logging.getLogger(__name__)
 
 
+def _is_owned_photo_path(path):
+    try:
+        root = os.path.normcase(os.path.abspath(config.PHOTO_DIR))
+        candidate = os.path.normcase(os.path.abspath(path))
+        return os.path.commonpath((root, candidate)) == root
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def _remove_owned_photos(records):
     for record in records:
         if not record.get(_OWNED_PHOTO_KEY):
             continue
         path = record.get("photo_path")
-        if not path:
+        if not path or not _is_owned_photo_path(path):
+            logger.warning("Пропущено удаление недоверенного пути служебного фото: %r", path)
             continue
         try:
             if os.path.isfile(path):
@@ -34,24 +44,28 @@ def _remove_owned_photos(records):
 
 def _prepare_records(records):
     prepared = []
-    for original in records:
-        record = dict(original)
-        record.setdefault("id", uuid.uuid4().hex)
-        if record.get("photo_path"):
-            source = os.path.abspath(record["photo_path"])
-            validate_photo(source)
-            photo_root = os.path.abspath(config.PHOTO_DIR)
-            if os.path.dirname(source) != photo_root:
-                os.makedirs(photo_root, exist_ok=True)
-                destination_photo = os.path.join(
-                    photo_root,
-                    uuid.uuid4().hex + os.path.splitext(source)[1],
-                )
-                with atomic_output(destination_photo) as temporary:
-                    shutil.copyfile(source, temporary)
-                record["photo_path"] = destination_photo
-                record[_OWNED_PHOTO_KEY] = True
-        prepared.append(record)
+    try:
+        for original in records:
+            record = dict(original)
+            record.setdefault("id", uuid.uuid4().hex)
+            if record.get("photo_path"):
+                source = os.path.abspath(record["photo_path"])
+                validate_photo(source)
+                photo_root = os.path.abspath(config.PHOTO_DIR)
+                if os.path.normcase(os.path.dirname(source)) != os.path.normcase(photo_root):
+                    os.makedirs(photo_root, exist_ok=True)
+                    destination_photo = os.path.join(
+                        photo_root,
+                        uuid.uuid4().hex + os.path.splitext(source)[1],
+                    )
+                    with atomic_output(destination_photo) as temporary:
+                        shutil.copyfile(source, temporary)
+                    record["photo_path"] = destination_photo
+                    record[_OWNED_PHOTO_KEY] = True
+            prepared.append(record)
+    except BaseException:
+        _remove_owned_photos(prepared)
+        raise
     return prepared
 
 
