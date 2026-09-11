@@ -14,7 +14,7 @@ def open_preview(parent, theme, front, back=None):
     dimensions = f"{front.width / 300 * 25.4:.1f} × {front.height / 300 * 25.4:.1f} мм · 300 dpi"
     ttk.Label(toolbar, text=dimensions).pack(side="left", padx=8)
     options = ttk.Combobox(toolbar, textvariable=side, state="readonly", width=15,
-                          values=["Лицевая", "Оборотная"] if back else ["Лицевая"])
+                           values=["Лицевая", "Оборотная"] if back else ["Лицевая"])
     options.pack(side="left", padx=8)
     canvas = tk.Canvas(win, bg="#d5d8dc", highlightthickness=0)
     vertical = ttk.Scrollbar(win, orient="vertical", command=canvas.yview)
@@ -23,6 +23,7 @@ def open_preview(parent, theme, front, back=None):
     horizontal.pack(side="bottom", fill="x")
     canvas.pack(fill="both", expand=True)
     canvas.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+
     def redraw(*_):
         source = back if side.get() == "Оборотная" and back is not None else front
         factor = scale.get() / 100

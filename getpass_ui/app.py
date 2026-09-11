@@ -195,7 +195,7 @@ class App:
         ttk.Button(bar, text="Очистить форму", command=self.clear_current_form,
                    style="Danger.TButton").pack(side="right", padx=(th.sp(2), 0))
         ttk.Button(bar, text="Черный список", command=self.open_blacklist,
-               style="Danger.TButton").pack(side="right", padx=(th.sp(2), 0))
+                   style="Danger.TButton").pack(side="right", padx=(th.sp(2), 0))
         ttk.Button(bar, text="Тёмная тема" if not th.is_dark else "Светлая тема",
                    command=self.toggle_theme, style="Ghost.TButton"
                    ).pack(side="right")
@@ -363,7 +363,7 @@ class App:
         car_card.pack(fill="x", pady=(0, th.sp(3)))
         cb = car_card.body
         section_title(cb, th, "Транспортное средство").pack(anchor="w",
-                                                             pady=(0, th.sp(3)))
+                                                            pady=(0, th.sp(3)))
         self.pass_notebook = ttk.Notebook(cb, style="Inner.TNotebook")
         self.pass_notebook.pack(fill="x")
         territory = self.settings.get("territory", "")
@@ -705,8 +705,8 @@ class App:
             if not dups:
                 continue
             lines = "\n".join(
-                f"  • №{d.get('num','')} — до {d.get('valid_until','')} "
-                f"({d.get('driver','') or 'водитель не указан'})" for d in dups[:5])
+                f"  • №{d.get('num', '')} — до {d.get('valid_until', '')} "
+                f"({d.get('driver', '') or 'водитель не указан'})" for d in dups[:5])
             more = f"\n  ... и ещё {len(dups) - 5}" if len(dups) > 5 else ""
             if not messagebox.askyesno(
                     "Уже есть действующий пропуск",
@@ -1055,7 +1055,12 @@ class App:
             return
         password = None
         if path.lower().endswith(".gupbak"):
-            password = simpledialog.askstring("Пароль копии", "Не менее 12 символов. Сохраните пароль: без него восстановление невозможно.", show="*", parent=self.root)
+            password = simpledialog.askstring(
+                "Пароль копии",
+                "Не менее 12 символов. Сохраните пароль: без него восстановление невозможно.",
+                show="*",
+                parent=self.root,
+            )
             if not password:
                 return
             repeated = simpledialog.askstring("Повторите пароль", "Повторите пароль копии", show="*", parent=self.root)
@@ -1063,7 +1068,8 @@ class App:
                 messagebox.showerror("Пароли не совпадают", "Копия не создана.")
                 return
         try:
-            count, size = run_task(self.root, lambda: getpass_core.backup.create_backup(path, password=password), "Резервное копирование")
+            count, size = run_task(self.root, lambda: getpass_core.backup.create_backup(
+                path, password=password), "Резервное копирование")
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось создать бэкап: {exc}")
             return
@@ -1088,7 +1094,11 @@ class App:
             if not password:
                 return
         try:
-            accepted, skipped = getpass_core.backup.inspect_backup(path, password=password)
+            accepted, skipped = run_task(
+                self.root,
+                lambda: getpass_core.backup.inspect_backup(path, password=password),
+                "Проверка резервной копии",
+            )
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось прочитать архив: {exc}")
             return
@@ -1104,7 +1114,11 @@ class App:
                 f"Текущие данные будут перезаписаны.{note}\n\nПродолжить?"):
             return
         try:
-            restored, _ = getpass_core.backup.restore_backup(path, password=password)
+            restored, _ = run_task(
+                self.root,
+                lambda: getpass_core.backup.restore_backup(path, password=password),
+                "Восстановление данных",
+            )
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось восстановить: {exc}")
             return

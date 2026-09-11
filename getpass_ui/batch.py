@@ -3,21 +3,21 @@ from __future__ import annotations
 
 import csv
 import os
+import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from PIL import ImageDraw
 
-from getpass_core import render as R
 from getpass_core import issuance
+from getpass_core import render as R
+from getpass_core.importing import photo_in_folder, validate_items
 from getpass_core.printing import save_pdf_pages
 from getpass_core.storage import FileBusy
-from getpass_core.importing import photo_in_folder, validate_items
 
 from .components import section_title
-from .theme import Card
 from .tasks import run_task
-import threading
+from .theme import Card
 
 PASS_TEMPLATE_HEADER = ["Номер пропуска", "Госномер", "Марка", "Модель", "Вид", "Цвет",
                         "Должность водителя", "ФИО водителя", "Телефон", "Зона допуска"]
@@ -55,9 +55,11 @@ def read_csv_rows(title):
     if not path:
         return None, None
     rows = []
+
     def load_rows(encoding):
         with open(path, "r", encoding=encoding, newline="") as stream:
             return list(csv.reader(stream, delimiter=";"))
+
     # Попытка прочитать в UTF-8, при неудаче — Windows-1251 (стандарт Excel)
     encodings = ("utf-8-sig", "cp1251", "utf-8")
     for enc in encodings:
@@ -70,7 +72,10 @@ def read_csv_rows(title):
             messagebox.showerror("Ошибка чтения", f"Не удалось прочитать файл: {exc}")
             return None, None
     else:
-        messagebox.showerror("Ошибка кодировки", "Не удалось распознать кодировку файла (требуется UTF-8 или CP1251).")
+        messagebox.showerror(
+            "Ошибка кодировки",
+            "Не удалось распознать кодировку файла (требуется UTF-8 или CP1251).",
+        )
         return None, None
 
     return path, rows[1:] if len(rows) > 1 else []
@@ -90,6 +95,7 @@ def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
         pass
 
     cancelled = threading.Event()
+
     def pages():
         for page in page_builder():
             if cancelled.is_set():
@@ -99,11 +105,20 @@ def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
     try:
         def produce():
             operation_id = issuance.prepare(journal, log_records, save_path)
-            save_pdf_pages(pages(), save_path)
+            try:
+                save_pdf_pages(pages(), save_path)
+            except Cancelled:
+                issuance.cancel(journal, operation_id)
+                raise
             return operation_id
+
         operation_id = run_task(parent, produce, title, cancelled=cancelled)
     except Cancelled:
-        messagebox.showinfo("Отменено", "Массовая печать прервана. Прежний файл сохранён.", parent=parent)
+        messagebox.showinfo(
+            "Отменено",
+            "Массовая печать прервана. Прежний файл сохранён.",
+            parent=parent,
+        )
         return False
     except ValueError:
         messagebox.showwarning("Пусто", "Нечего печатать.", parent=parent)
@@ -119,7 +134,8 @@ def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
             "Журнал не обновлён",
             f"PDF сохранён, но «{os.path.basename(exc.path)}» занят другой программой.\n"
             f"Закройте его и повторите — записи ({len(log_records)} шт.) не попали в журнал.",
-            parent=parent)
+            parent=parent,
+        )
         return False
     except Exception as exc:
         messagebox.showerror("Журнал не обновлён",
@@ -136,14 +152,21 @@ def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
 
 
 def review_import(parent, theme, items, journal):
-    results = run_task(parent, lambda: validate_items(items, journal, badge="tab_num" in journal.schema.keys), "Проверка импорта")
+    results = run_task(
+        parent,
+        lambda: validate_items(items, journal, badge="tab_num" in journal.schema.keys),
+        "Проверка импорта",
+    )
     win = theme.toplevel(parent, "Проверка импорта")
     win.geometry("1000x600")
     win.transient(parent)
     win.grab_set()
     errors = sum(bool(e) for _, e, _ in results)
     warnings = sum(bool(w) for _, _, w in results)
-    ttk.Label(win, text=f"Записей: {len(items)} · С ошибками: {errors} · Предупреждений: {warnings}").pack(pady=12)
+    ttk.Label(
+        win,
+        text=f"Записей: {len(items)} · С ошибками: {errors} · Предупреждений: {warnings}",
+    ).pack(pady=12)
     tree = ttk.Treeview(win, columns=("row", "number", "person", "result"), show="headings")
     for key, title, width in (("row", "Строка", 60), ("number", "Номер", 120),
                               ("person", "Сотрудник / водитель", 220), ("result", "Проверка", 450)):
@@ -158,9 +181,14 @@ def review_import(parent, theme, items, journal):
         tree.insert("", "end", values=(row, item.get("tab_num", item.get("plate", "")),
                     item.get("fio", item.get("driver_full", "")), "; ".join(err + warn) or "Готово"),
                     tags=("error",) if err else ())
+
     def save_report():
-        path = filedialog.asksaveasfilename(parent=win, defaultextension=".csv",
-            filetypes=[("CSV", "*.csv")], initialfile="отчёт_импорта.csv")
+        path = filedialog.asksaveasfilename(
+            parent=win,
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv")],
+            initialfile="отчёт_импорта.csv",
+        )
         if not path:
             return
         try:
@@ -173,13 +201,18 @@ def review_import(parent, theme, items, journal):
             messagebox.showinfo("Отчёт сохранён", path, parent=win)
         except OSError as exc:
             messagebox.showerror("Ошибка", f"Не удалось сохранить отчёт:\n{exc}", parent=win)
+
     accepted = [False]
+
     def proceed():
-        if warnings and not messagebox.askyesno("Подтвердить предупреждения",
-                "Есть совпадения с журналом или чёрным списком. Продолжить выдачу?", parent=win):
+        if warnings and not messagebox.askyesno(
+                "Подтвердить предупреждения",
+                "Есть совпадения с журналом или чёрным списком. Продолжить выдачу?",
+                parent=win):
             return
         accepted[0] = True
         win.destroy()
+
     bar = ttk.Frame(win)
     bar.pack(fill="x", padx=12, pady=12)
     ttk.Button(bar, text="Вернуться и исправить CSV", command=win.destroy).pack(side="left")
@@ -195,8 +228,10 @@ def parse_pass_rows(rows, common):
     for r in rows:
         if len(r) < 2 or not r[1].strip():
             continue
+
         def cell(i, default=""):
             return r[i].strip() if len(r) > i else default
+
         pos, fio = cell(6), cell(7)
         items.append({
             "num": cell(0), "plate": cell(1), "brand": cell(2), "model": cell(3),
@@ -213,8 +248,10 @@ def parse_badge_rows(rows, folder, defaults):
     for r in rows:
         if len(r) < 4 or not r[1].strip():
             continue
+
         def cell(i, default=""):
             return r[i].strip() if len(r) > i else default
+
         photo = cell(7)
         photo_path = photo_in_folder(folder, photo)
         if not os.path.exists(photo_path):

@@ -75,7 +75,7 @@ class JournalWindow:
                             ("Просроченные", "expired"), ("Аннулированные", "revoked"),
                             ("Без срока", "unknown")):
             th.radio(radios, text, self.filter_var, value).pack(side="left",
-                                                                 padx=(0, th.sp(2)))
+                                                                padx=(0, th.sp(2)))
 
         row2 = tk.Frame(bar, bg=th.c("ground"))
         row2.pack(fill="x", pady=(0, th.sp(2)))
@@ -375,7 +375,6 @@ class JournalWindow:
             messagebox.showerror("Ошибка", f"Не удалось открыть файл: {exc}",
                                  parent=self.win)
 
-
     def _filter_snapshot(self):
         return {
             "search": self.search_var.get(), "status": self.filter_var.get(),
@@ -390,7 +389,7 @@ class JournalWindow:
 
     def export_current(self):
         path = filedialog.asksaveasfilename(parent=self.win, defaultextension=".xlsx",
-            filetypes=[("Excel", "*.xlsx")], initialfile="выборка_журнала.xlsx")
+                                            filetypes=[("Excel", "*.xlsx")], initialfile="выборка_журнала.xlsx")
         if not path:
             return
         ids = set(self.tree.get_children())
@@ -436,7 +435,7 @@ class EditRecordDialog:
             entry.set(rec.get(f.key, ""))
             self.entries[f.key] = entry
 
-        tk.Label(pad, text=f"ID записи: {rec.get('id','')}", bg=th.c("ground"),
+        tk.Label(pad, text=f"ID записи: {rec.get('id', '')}", bg=th.c("ground"),
                  fg=th.c("ink_faint"), font=th.font("caption")).pack(
             anchor="w", pady=(th.sp(2), th.sp(2)))
 

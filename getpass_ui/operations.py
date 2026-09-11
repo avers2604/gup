@@ -15,6 +15,7 @@ def open_operations(parent, theme):
         tree.column(key, width=250)
     tree.pack(fill="both", expand=True, padx=12)
     jobs = {}
+
     def refresh():
         tree.delete(*tree.get_children())
         jobs.clear()
@@ -22,6 +23,7 @@ def open_operations(parent, theme):
             for job in issuance.pending(journal):
                 jobs[job["id"]] = (journal, job)
                 tree.insert("", "end", iid=job["id"], values=(job["created_at"], journal.schema.name, job["destination"]))
+
     def confirm():
         if not tree.selection():
             return
@@ -33,6 +35,7 @@ def open_operations(parent, theme):
             refresh()
         except Exception as exc:
             messagebox.showerror("Не удалось подтвердить", str(exc), parent=win)
+
     def open_file():
         if not tree.selection():
             return
@@ -40,7 +43,8 @@ def open_operations(parent, theme):
         if os.path.isfile(path) and path.lower().endswith((".pdf", ".jpg", ".png")):
             os.startfile(path)
         else:
-            messagebox.showinfo("Файл недоступен", "Документ не сохранён. Повторите подготовку по данным операции.", parent=win)
+            messagebox.showinfo("Файл недоступен",
+                                "Документ не сохранён. Повторите подготовку по данным операции.", parent=win)
     bar = ttk.Frame(win)
     bar.pack(fill="x", padx=12, pady=12)
     ttk.Button(bar, text="Обновить", command=refresh).pack(side="left")
