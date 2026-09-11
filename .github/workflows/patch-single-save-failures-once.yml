@@ -1,0 +1,34 @@
+name: Apply single-save recovery patch once
+
+on:
+  push:
+    branches: [codex/reliability-windows-release]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: codex/reliability-windows-release
+
+      - name: Apply exact patch and compile
+        run: |
+          python .github/scripts/patch-single-save-failures.py
+          python -m py_compile getpass_ui/app.py getpass_ui/badge_tab.py
+
+      - name: Commit patch and remove one-shot tooling
+        shell: bash
+        run: |
+          rm .github/scripts/patch-single-save-failures.py
+          rm .github/workflows/patch-single-save-failures-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add getpass_ui/app.py getpass_ui/badge_tab.py .github
+          git commit -m "fix: cancel issuance when single-file save fails"
+          git push origin HEAD:codex/reliability-windows-release
