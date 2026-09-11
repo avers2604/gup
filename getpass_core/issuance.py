@@ -1,5 +1,6 @@
 """Durable issuance intent. Output failures remain recoverable after restart."""
 import json
+import logging
 import os
 import shutil
 import uuid
@@ -12,70 +13,107 @@ from .importing import validate_photo
 STATE_PREPARED = "prepared"
 STATE_CONFIRMED = "confirmed"
 STATE_CANCELLED = "cancelled"
+_OWNED_PHOTO_KEY = "_issuance_owned_photo"
+
+logger = logging.getLogger(__name__)
+
+
+def _remove_owned_photos(records):
+    for record in records:
+        if not record.get(_OWNED_PHOTO_KEY):
+            continue
+        path = record.get("photo_path")
+        if not path:
+            continue
+        try:
+            if os.path.isfile(path):
+                os.remove(path)
+        except OSError:
+            logger.warning("Не удалось удалить служебную копию фото %s", path, exc_info=True)
+
+
+def _prepare_records(records):
+    prepared = []
+    for original in records:
+        record = dict(original)
+        record.setdefault("id", uuid.uuid4().hex)
+        if record.get("photo_path"):
+            source = os.path.abspath(record["photo_path"])
+            validate_photo(source)
+            photo_root = os.path.abspath(config.PHOTO_DIR)
+            if os.path.dirname(source) != photo_root:
+                os.makedirs(photo_root, exist_ok=True)
+                destination_photo = os.path.join(
+                    photo_root,
+                    uuid.uuid4().hex + os.path.splitext(source)[1],
+                )
+                with atomic_output(destination_photo) as temporary:
+                    shutil.copyfile(source, temporary)
+                record["photo_path"] = destination_photo
+                record[_OWNED_PHOTO_KEY] = True
+        prepared.append(record)
+    return prepared
 
 
 def prepare(journal, records, destination):
     operation_id = uuid.uuid4().hex
-    conn = journal._connect()
+    prepared = []
+    conn = None
     try:
+        prepared = _prepare_records(records)
+        payload = json.dumps(prepared, ensure_ascii=False)
+        conn = journal._connect()
         with conn:
             conn.execute('''CREATE TABLE IF NOT EXISTS issuance_jobs (
                 id TEXT PRIMARY KEY, journal TEXT NOT NULL, records_json TEXT NOT NULL,
                 destination TEXT NOT NULL, created_at TEXT NOT NULL,
                 state TEXT NOT NULL DEFAULT 'prepared')''')
-            for record in records:
-                record.setdefault("id", uuid.uuid4().hex)
-                if record.get("photo_path"):
-                    source = os.path.abspath(record["photo_path"])
-                    validate_photo(source)
-                    photo_root = os.path.abspath(config.PHOTO_DIR)
-                    if os.path.dirname(source) != photo_root:
-                        os.makedirs(photo_root, exist_ok=True)
-                        destination_photo = os.path.join(
-                            photo_root,
-                            uuid.uuid4().hex + os.path.splitext(source)[1],
-                        )
-                        with atomic_output(destination_photo) as temporary:
-                            shutil.copyfile(source, temporary)
-                        record["photo_path"] = destination_photo
             conn.execute(
                 "INSERT INTO issuance_jobs (id, journal, records_json, destination, created_at) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (
                     operation_id,
                     journal.schema.table,
-                    json.dumps(records, ensure_ascii=False),
+                    payload,
                     destination,
                     datetime.now().astimezone().isoformat(),
                 ),
             )
+    except BaseException:
+        _remove_owned_photos(prepared)
+        raise
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
     return operation_id
 
 
 def cancel(journal, operation_id):
     """Mark a prepared issuance as cancelled so it cannot be confirmed later."""
     conn = journal._connect()
+    records = []
     try:
         with conn:
             conn.execute("BEGIN IMMEDIATE")
             job = conn.execute(
-                "SELECT state FROM issuance_jobs WHERE id=? AND journal=?",
+                "SELECT state, records_json FROM issuance_jobs WHERE id=? AND journal=?",
                 (operation_id, journal.schema.table),
             ).fetchone()
             if job is None:
                 raise ValueError("Операция не найдена")
-            if job["state"] == STATE_CANCELLED:
-                return
             if job["state"] == STATE_CONFIRMED:
                 raise ValueError("Подтверждённую выдачу нельзя отменить")
-            conn.execute(
-                "UPDATE issuance_jobs SET state=? WHERE id=? AND journal=?",
-                (STATE_CANCELLED, operation_id, journal.schema.table),
-            )
+            records = json.loads(job["records_json"])
+            if job["state"] != STATE_CANCELLED:
+                if job["state"] != STATE_PREPARED:
+                    raise ValueError(f"Недопустимое состояние операции: {job['state']}")
+                conn.execute(
+                    "UPDATE issuance_jobs SET state=? WHERE id=? AND journal=?",
+                    (STATE_CANCELLED, operation_id, journal.schema.table),
+                )
     finally:
         conn.close()
+    _remove_owned_photos(records)
 
 
 def confirm(journal, operation_id):
@@ -93,9 +131,12 @@ def confirm(journal, operation_id):
                 return
             if job["state"] == STATE_CANCELLED:
                 raise ValueError("Операция отменена и не может быть подтверждена")
+            if job["state"] != STATE_PREPARED:
+                raise ValueError(f"Недопустимое состояние операции: {job['state']}")
             records = json.loads(job["records_json"])
             prepared = []
             for record in records:
+                record.pop(_OWNED_PHOTO_KEY, None)
                 record["status"] = "действует"
                 if "plate" in journal.schema.keys:
                     record["zone"] = (
