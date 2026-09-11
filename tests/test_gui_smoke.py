@@ -10,7 +10,7 @@ import pytest
 tkinter = pytest.importorskip("tkinter")
 
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("DISPLAY"),
+    os.name != "nt" and not os.environ.get("DISPLAY"),
     reason="нужен X-сервер (запускать через xvfb-run)")
 
 
@@ -215,6 +215,7 @@ def test_window_geometry_and_active_tab_persist_across_restart(app, monkeypatch)
     app.root.update()
     app.notebook.select(1)
     app.root.update()
+    actual_size = (app.root.winfo_width(), app.root.winfo_height())
     app.on_closing()
 
     second = App()
@@ -222,7 +223,7 @@ def test_window_geometry_and_active_tab_persist_across_restart(app, monkeypatch)
         second.root.update()
         assert second.notebook.index(second.notebook.select()) == 1
         width, height = (int(v) for v in second.root.geometry().split("+")[0].split("x"))
-        assert (width, height) == (1200, 800)
+        assert (width, height) == actual_size
     finally:
         second.root.destroy()
 

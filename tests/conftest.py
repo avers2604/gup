@@ -18,6 +18,8 @@ def data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CARS_CACHE_FILE", str(d / "cars.json"))
     monkeypatch.setattr(config, "CRASH_LOG_FILE", str(d / "crash.log"))
     monkeypatch.setattr(config, "DB_FILE", str(d / "test.sqlite3"))
+    monkeypatch.setattr(config, "BLACKLIST_FILE", str(d / "blacklist.json"))
+    monkeypatch.setattr(config, "BACKUP_DIR", str(d / "backups"))
     return d
 
 

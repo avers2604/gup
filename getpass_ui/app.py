@@ -7,11 +7,11 @@ import threading
 import tkinter as tk
 import traceback
 from datetime import datetime
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk, simpledialog
 
 import getpass_core
 from getpass_core import blacklist
-from getpass_core import config, printing
+from getpass_core import config, printing, issuance
 from getpass_core.domain import (add_months_safe, add_years_safe, format_date,
                                  next_number, parse_date)
 from getpass_core.dpi import (apply_scaling, enable_dpi_awareness, fit_to_screen,
@@ -79,12 +79,29 @@ class App:
         self._build_pass_tab()
         self.badge = BadgePanel(self.notebook, self.settings, self.root, self.theme)
         self.badge.bind_app(self)
+        draft = self.settings.get("draft")
+        if isinstance(draft, dict):
+            for name in ("p1", "p2"):
+                if isinstance(draft.get(name), dict):
+                    getattr(self, name).restore(draft[name])
+            badge = draft.get("badge", {})
+            if isinstance(badge, dict) and badge:
+                self.badge.tab_num.set(badge.get("tab_num", ""))
+                for var, key in ((self.badge.sur_var, "surname"), (self.badge.nam_var, "name"),
+                                 (self.badge.pat_var, "patronymic")):
+                    var.set(badge.get(key, ""))
+                for field, key in ((self.badge.role, "role"), (self.badge.phone, "phone"),
+                                   (self.badge.issue, "issue_date"), (self.badge.valid, "valid_until")):
+                    field.set(badge.get(key, ""))
+                self.badge.photo_path = badge.get("photo_path")
+                self.badge._on_crop_cancel()
 
         self._bind_hotkeys()
         self.root.bind_all("<MouseWheel>", self._global_mousewheel)
         self.update_tab_states()
         self.root.after(200, self._startup_checks)
         self.root.after(250, self._initial_previews)
+        self.root.after(30000, self._autosave)
         active_tab = self.settings.get("active_tab", 0)
         if active_tab in (0, 1):
             try:
@@ -193,6 +210,8 @@ class App:
                        relief="flat", bd=0)
         menu.add_command(label="Резервная копия", command=self.backup_database)
         menu.add_command(label="Восстановить из копии", command=self.restore_database)
+        from .operations import open_operations
+        menu.add_command(label="Незавершённые выдачи", command=lambda: open_operations(self.root, th))
         x = self._more_btn.winfo_rootx()
         y = self._more_btn.winfo_rooty() + self._more_btn.winfo_height()
         try:
@@ -203,7 +222,7 @@ class App:
     def toggle_theme(self):
         current = self.settings.get("theme", "light")
         self.settings["theme"] = "dark" if current == "light" else "light"
-        config.save_settings({"theme": self.settings["theme"]})
+        config.save_settings(dict(self.collect_settings(), theme=self.settings["theme"]))
         if messagebox.askyesno(
                 "Смена темы",
                 "Тема изменена. Чтобы применить её ко всем окнам,\n"
@@ -426,6 +445,7 @@ class App:
         head = tk.Frame(b, bg=th.c("surface"))
         head.pack(fill="x", pady=(0, th.sp(3)))
         section_title(head, th, "Предпросмотр бланка").pack(side="left")
+        ttk.Button(b, text="Открыть крупно / оборот", command=self.open_print_preview).pack(fill="x")
         self.preview_target = tk.StringVar(value=self.settings.get("auto_preview_target", "1"))
         switch = tk.Frame(head, bg=th.c("surface"))
         switch.pack(side="right")
@@ -446,6 +466,13 @@ class App:
     def _initial_previews(self):
         self.badge.preview.schedule(delay=10)
         self.preview.schedule(delay=20)
+
+    def open_print_preview(self):
+        from .preview import open_preview
+        form = self.p2 if self.preview_target.get() == "2" else self.p1
+        open_preview(self.root, self.theme,
+                     R.render_pass(form.data(placeholder=True), self.common_data(preview=True)),
+                     R.render_pass_back() if self.print_back_var.get() else None)
 
     def _render_preview(self):
         try:
@@ -508,6 +535,8 @@ class App:
         except Exception:
             pass_paned_width = self.settings.get("pass_paned_width", 0)
         return {
+            "draft": {"p1": self.p1.data(), "p2": self.p2.data(),
+                      "badge": self.badge.preview_data() if self.badge.sur_var.get() else {}},
             "last_pass_num": self.p1.get_number() or self.settings.get("last_pass_num"),
             "territory": self.p1.territory.get().strip() or self.settings.get("territory"),
             "otb_post": self.entry_otb_post.get().strip(),
@@ -521,6 +550,8 @@ class App:
             "window_geometry": f"{self.root.winfo_width()}x{self.root.winfo_height()}",
             "active_tab": self.notebook.index(self.notebook.select()),
             "pass_paned_width": pass_paned_width,
+            "theme": self.settings.get("theme", "light"),
+            "warn_duplicates": self.settings.get("warn_duplicates", True),
             **self.badge.collect_settings(),
         }
 
@@ -528,6 +559,10 @@ class App:
         values = self.collect_settings()
         self.settings.update(values)
         config.save_settings(values)
+
+    def _autosave(self):
+        self.save_settings()
+        self.root.after(30000, self._autosave)
 
     def on_closing(self):
         if messagebox.askokcancel("Выход", "Закрыть программу?\n\n"
@@ -741,14 +776,20 @@ class App:
             rec["zone"] = rec.get("territory") or "Основная (Без зоны)"
             rec["driver"] = rec.get("driver_full", "")
         try:
-            PASS_JOURNAL.append_many(records)
+            if getattr(self, "_issuance_id", None):
+                issuance.confirm(PASS_JOURNAL, self._issuance_id)
+                self._issuance_id = None
+            else:
+                PASS_JOURNAL.append_many(records)
         except FileBusy as exc:
             messagebox.showerror(
                 "Журнал не обновлён",
                 f"Документ готов, но «{os.path.basename(exc.path)}» открыт "
                 "в другой программе.\nЗакройте его — записи в журнал не попали.")
+            return False
         except Exception as exc:
             messagebox.showerror("Журнал не обновлён", str(exc))
+            return False
         update_cars_cache(records)
 
         if next_num.overflowed:
@@ -758,8 +799,9 @@ class App:
                 "Проверьте серию и при необходимости задайте номер вручную.")
         self.p1.set_number(next_num.value)
         self.p2.set_number(next_number(next_num.value).value)
-        self.save_settings()
         self.clear_pass_forms()
+        self.save_settings()
+        return True
 
     def generate_pass(self):
         built = self.build_documents()
@@ -774,6 +816,7 @@ class App:
             return
         is_pdf = os.path.splitext(path)[1].lower() == ".pdf"
         try:
+            self._issuance_id = issuance.prepare(PASS_JOURNAL, records, path)
             if back_document is not None and is_pdf:
                 printing.save_pdf_pages([document, back_document], path)
             else:
@@ -786,7 +829,8 @@ class App:
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось сохранить файл:\n{exc}")
             return
-        self._finish_pass(records, next_num)
+        if not self._finish_pass(records, next_num):
+            return
         messagebox.showinfo("Готово",
                             f"Документ сформирован!\nСледующий номер: {next_num.value}")
 
@@ -795,6 +839,11 @@ class App:
         if not built:
             return
         document, back_document, prefix, records, next_num = built
+        try:
+            self._issuance_id = issuance.prepare(PASS_JOURNAL, records, self.printer_var.get())
+        except Exception as exc:
+            messagebox.showerror("Выдача не начата", str(exc))
+            return
         if back_document is not None:
             ok, err = printing.print_pass_two_sided(
                 document, back_document, self.printer_var.get(),
@@ -802,7 +851,8 @@ class App:
         else:
             ok, err = printing.send_image_to_printer(document, self.printer_var.get())
         if ok:
-            self._finish_pass(records, next_num)
+            if not self._finish_pass(records, next_num):
+                return
             messagebox.showinfo("Печать", "Документ успешно отправлен на принтер!")
             return
         temp_pdf = os.path.join(config.DATA_DIR, f"_print_{prefix}.pdf")
@@ -967,7 +1017,11 @@ class App:
         path, rows = B.read_csv_rows("Массовая печать: выберите CSV со списком сотрудников")
         if rows is None:
             return
-        items = B.parse_badge_rows(rows, os.path.dirname(path), self.badge.batch_defaults())
+        try:
+            items = B.parse_badge_rows(rows, os.path.dirname(path), self.badge.batch_defaults())
+        except ValueError as exc:
+            messagebox.showerror("Ошибка импорта", str(exc))
+            return
         if not items:
             messagebox.showwarning("Пусто", "В файле нет записей.")
             return
@@ -987,14 +1041,26 @@ class App:
 
     def backup_database(self):
         path = filedialog.asksaveasfilename(
-            defaultextension=".zip", filetypes=[("ZIP Архив", "*.zip")],
-            initialfile=f"Backup_GET_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip")
+            defaultextension=".gupbak", filetypes=[("Защищённая копия", "*.gupbak"), ("ZIP без пароля", "*.zip")],
+            initialfile=f"Backup_GET_{datetime.now().strftime('%Y%m%d_%H%M%S')}.gupbak")
         if not path:
             return
+        password = None
+        if path.lower().endswith(".gupbak"):
+            password = simpledialog.askstring("Пароль копии", "Не менее 12 символов. Сохраните пароль: без него восстановление невозможно.", show="*", parent=self.root)
+            if not password:
+                return
+            repeated = simpledialog.askstring("Повторите пароль", "Повторите пароль копии", show="*", parent=self.root)
+            if repeated != password:
+                messagebox.showerror("Пароли не совпадают", "Копия не создана.")
+                return
         try:
-            count, size = getpass_core.backup.create_backup(path)
+            count, size = getpass_core.backup.create_backup(path, password=password)
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось создать бэкап: {exc}")
+            return
+        if password:
+            messagebox.showinfo("Защищённая копия создана", f"Сохранено файлов: {count} ({size // 1024} КБ)\n{path}")
             return
         messagebox.showwarning(
             "Резервная копия создана",
@@ -1004,12 +1070,17 @@ class App:
             "ограниченным доступом и не пересылайте по открытым каналам.")
 
     def restore_database(self):
-        path = filedialog.askopenfilename(title="Выберите ZIP-архив",
-                                          filetypes=[("ZIP Архив", "*.zip")])
+        path = filedialog.askopenfilename(title="Выберите резервную копию",
+                                          filetypes=[("Резервная копия", "*.gupbak *.zip")])
         if not path:
             return
+        password = None
+        if path.lower().endswith(".gupbak"):
+            password = simpledialog.askstring("Пароль копии", "Введите пароль", show="*", parent=self.root)
+            if not password:
+                return
         try:
-            accepted, skipped = getpass_core.backup.inspect_backup(path)
+            accepted, skipped = getpass_core.backup.inspect_backup(path, password=password)
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось прочитать архив: {exc}")
             return
@@ -1025,12 +1096,15 @@ class App:
                 f"Текущие данные будут перезаписаны.{note}\n\nПродолжить?"):
             return
         try:
-            restored, _ = getpass_core.backup.restore_backup(path)
+            restored, _ = getpass_core.backup.restore_backup(path, password=password)
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось восстановить: {exc}")
             return
         messagebox.showinfo("Успех",
                             f"Восстановлено файлов: {restored}.\nПерезапустите программу.")
+        self.preview.cancel()
+        self.badge.preview.cancel()
+        self.root.destroy()
 
     def run(self):
         self.root.mainloop()

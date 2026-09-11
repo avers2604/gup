@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox, simpledialog, ttk
@@ -35,6 +36,8 @@ class JournalWindow:
         self.records = journal.read()
         self.sort_key = None
         self.sort_reverse = False
+        self.page = 0
+        self.page_size = 100
         self._extra_widgets = {}
 
         th = theme
@@ -137,10 +140,12 @@ class JournalWindow:
         self.status.pack(side="left")
         ttk.Button(bar, text="Изменить", command=self.edit_selected,
                    style="Ghost.TButton").pack(side="left", padx=(th.sp(4), th.sp(2)))
+        ttk.Button(bar, text="История", command=self.show_history).pack(side="left")
+        ttk.Button(bar, text="←", command=lambda: self.turn_page(-1)).pack(side="left")
+        ttk.Button(bar, text="→", command=lambda: self.turn_page(1)).pack(side="left")
+        ttk.Button(bar, text="Обновить", command=self.reload).pack(side="left")
         ttk.Button(bar, text="Открыть в Excel", command=self.open_excel,
                    style="Ghost.TButton").pack(side="right")
-        ttk.Button(bar, text="Удалить", command=self.delete_selected,
-                   style="Danger.TButton").pack(side="right", padx=(0, th.sp(2)))
         ttk.Button(bar, text="Аннулировать", command=self.revoke_selected,
                    style="Ghost.TButton").pack(side="right", padx=(0, th.sp(2)))
 
@@ -149,7 +154,9 @@ class JournalWindow:
             self.sort_reverse = not self.sort_reverse
         else:
             self.sort_key, self.sort_reverse = key, False
-        self.records.sort(key=lambda r: (r.get(key) or "").lower(),
+        self.records.sort(key=lambda r: (parse_date(r.get(key)) or datetime.min)
+                          if key in {"issue_date", "valid_until", "revoked_at"}
+                          else (r.get(key) or "").lower(),
                           reverse=self.sort_reverse)
         for f in self.visible_fields:
             arrow = ""
@@ -159,6 +166,8 @@ class JournalWindow:
         self.apply_filter()
 
     def apply_filter(self, *_args):
+        if _args:
+            self.page = 0
         query = self.search_var.get().lower().strip()
         mode = self.filter_var.get()
         d_from = parse_date(self.date_from.get())
@@ -194,11 +203,48 @@ class JournalWindow:
             if skip:
                 continue
             values = [self._display(rec, f.key, state) for f in self.visible_fields]
-            self.tree.insert("", "end", iid=rec["id"], values=values, tags=(state,))
+            if self.page * self.page_size <= shown < (self.page + 1) * self.page_size:
+                self.tree.insert("", "end", iid=rec["id"], values=values, tags=(state,))
             shown += 1
+        self.filtered_count = shown
         self.status.config(
             text=f"Показано: {shown} из {len(self.records)}   "
                  f"(журнал: {self.schema.name})")
+
+    def turn_page(self, delta):
+        self.page = max(0, min(self.page + delta, max(0, (self.filtered_count - 1) // self.page_size)))
+        self.apply_filter()
+
+    def reload(self):
+        self.records = self.journal.read()
+        self.page = 0
+        self.refresh_filter_sources()
+        self.apply_filter()
+
+    def show_history(self):
+        ids = self._selected_ids()
+        if not ids:
+            return
+        conn = self.journal._connect()
+        try:
+            rows = conn.execute("SELECT * FROM journal_events WHERE journal=? AND record_id=? ORDER BY event_id",
+                                (self.schema.table, ids[0])).fetchall()
+        finally:
+            conn.close()
+        win = self.theme.toplevel(self.win, "История записи")
+        win.geometry("800x500")
+        text = tk.Text(win, wrap="word")
+        text.pack(fill="both", expand=True)
+        for row in rows:
+            text.insert("end", f"{row['occurred_at']} · {row['actor']} · {row['action']}\n")
+            before, after = json.loads(row["before_json"]), json.loads(row["after_json"])
+            for field in self.schema.fields:
+                if before.get(field.key) != after.get(field.key):
+                    text.insert("end", f"{field.title}: {before.get(field.key, '')} → {after.get(field.key, '')}\n")
+            text.insert("end", "\n")
+        if not rows:
+            text.insert("end", "Запись создана до включения истории изменений.")
+        text.configure(state="disabled")
 
     _STATE_LABEL = {"expired": "просрочен", "unknown": "нет срока"}
 
@@ -299,7 +345,8 @@ class JournalWindow:
         EditRecordDialog(self.win, self.theme, self.schema, rec, self._on_edited)
 
     def _on_edited(self, rec_id, values):
-        if self._save(self.journal.update_record, rec_id, values):
+        expected = next((dict(r) for r in self.records if r["id"] == rec_id), None)
+        if self._save(self.journal.update_record, rec_id, values, expected):
             self.apply_filter()
             return True
         return False
@@ -352,7 +399,7 @@ class EditRecordDialog:
 
         self.entries = {}
         for f in schema.fields:
-            if f.key == "id":
+            if f.key in {"id", "status", "revoked_at", "revoke_reason"}:
                 continue
             entry = Field(pad, th, f.title, width=38)
             entry.pack(fill="x", pady=(0, th.sp(2)))

@@ -8,7 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from PIL import ImageTk
 
-from getpass_core import config, printing
+from getpass_core import config, printing, issuance
 from getpass_core import blacklist
 from getpass_core import render as R
 from getpass_core.domain import (add_years_safe, format_date, next_number,
@@ -180,6 +180,9 @@ class BadgePanel:
         b = self.panel.body
         section_title(b, th, "Предпросмотр бейджа (85 × 54 мм)").pack(
             anchor="w", pady=(0, th.sp(3)))
+        from .preview import open_preview
+        ttk.Button(b, text="Открыть крупно", command=lambda: open_preview(
+            self.root, th, R.render_single_badge_image(self.preview_data()))).pack(fill="x")
         self.preview_label = tk.Label(b, bg=th.c("surface"), fg=th.c("ink_faint"),
                                       font=th.font("body"), text="Предпросмотр загружается...")
         self.preview_label.pack(fill="both", expand=True)
@@ -340,14 +343,20 @@ class BadgePanel:
     def _finish(self, data):
         record = dict(data)
         try:
-            BADGE_JOURNAL.append_many([record])
+            if getattr(self, "_issuance_id", None):
+                issuance.confirm(BADGE_JOURNAL, self._issuance_id)
+                self._issuance_id = None
+            else:
+                BADGE_JOURNAL.append_many([record])
         except FileBusy as exc:
             messagebox.showerror(
                 "Журнал не обновлён",
                 f"Документ готов, но «{os.path.basename(exc.path)}» открыт "
                 "в другой программе.\nЗакройте его — запись в журнал не попала.")
+            return None
         except Exception as exc:
             messagebox.showerror("Журнал не обновлён", str(exc))
+            return None
         nxt = next_number(data["tab_num"])
         if nxt.overflowed:
             messagebox.showwarning(
@@ -355,6 +364,8 @@ class BadgePanel:
                 f"Следующий табельный номер «{nxt.value}» вышел за разрядность.")
         self.tab_num.set(nxt.value)
         self.clear_form()
+        if self.app:
+            self.app.save_settings()
         return nxt.value
 
     def generate_pdf(self):
@@ -368,11 +379,14 @@ class BadgePanel:
         if not path:
             return
         try:
+            self._issuance_id = issuance.prepare(BADGE_JOURNAL, [data], path)
             printing.save_document(document, path)
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось сохранить файл:\n{exc}")
             return
         nxt = self._finish(data)
+        if nxt is None:
+            return
         messagebox.showinfo("Готово",
                             f"Пропуск работника сформирован!\nСледующий табельный: {nxt}")
 
@@ -382,9 +396,15 @@ class BadgePanel:
             return
         document, prefix = self.build_document(data)
         printer = self.app.printer_var.get() if self.app else printing.DEFAULT_PRINTER
+        try:
+            self._issuance_id = issuance.prepare(BADGE_JOURNAL, [data], printer)
+        except Exception as exc:
+            messagebox.showerror("Выдача не начата", str(exc))
+            return
         ok, err = printing.send_image_to_printer(document, printer)
         if ok:
-            self._finish(data)
+            if self._finish(data) is None:
+                return
             messagebox.showinfo("Печать", "Бейдж успешно отправлен на принтер!")
             return
         temp_pdf = os.path.join(config.DATA_DIR, f"_print_{data['tab_num']}.pdf")

@@ -16,13 +16,16 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.13", "3.14"]
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v5
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - name: Set up Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
       with:
-        python-version: "3.10"
+        python-version: ${{ matrix.python }}
 
     # Xvfb и библиотеки Tk нужны, чтобы прогонять проверки интерфейса
     # без монитора: именно они ловят «форма построилась, но не видна».
@@ -51,4 +54,8 @@ jobs:
 
     - name: Test with pytest
       run: |
-        xvfb-run -a --server-args="-screen 0 1920x1200x24" python -m pytest -v
+        xvfb-run -a --server-args="-screen 0 1920x1200x24" python -m pytest --cov --cov-report=xml -v
+    - name: Dependency audit
+      run: python -m pip_audit -r requirements.txt
+    - name: Security analysis
+      run: python -m bandit -r getpass_core getpass_ui -lll
