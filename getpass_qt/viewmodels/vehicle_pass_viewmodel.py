@@ -47,6 +47,9 @@ class VehiclePassViewModel(QObject):
     def brands(self) -> tuple[str, ...]:
         return self._service.brands()
 
+    def printers(self) -> tuple[str, ...]:
+        return self._service.printers()
+
     def set_pass_field(self, slot: str, field: str, value) -> None:
         if slot not in ("first", "second"):
             raise ValueError(f"Unknown pass slot: {slot}")
