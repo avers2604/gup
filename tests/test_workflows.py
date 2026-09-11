@@ -35,7 +35,7 @@ def test_inno_setup_contract_matches_project_version():
     assert "DefaultDirName={autopf}\\GET-Passes" in installer
     assert "PrivilegesRequired=admin" in installer
     assert "UninstallDisplayIcon={app}\\GET-Passes.exe" in installer
-    assert "Filename: {app}\\GET-Passes.exe" in installer
+    assert 'Filename: "{app}\\GET-Passes.exe"' in installer
 
 
 def test_windows_pr_smoke_installs_runs_and_uninstalls_setup():
