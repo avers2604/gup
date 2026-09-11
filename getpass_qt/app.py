@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 
+from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from getpass_app.services.settings_service import SettingsService
@@ -31,6 +32,13 @@ def _vehicle_viewmodel(*, self_test: bool) -> VehiclePassViewModel:
     return VehiclePassViewModel(service)
 
 
+def _wait_for_preview_refresh(_window, app) -> None:
+    loop = QEventLoop()
+    QTimer.singleShot(250, loop.quit)
+    loop.exec()
+    app.processEvents()
+
+
 def _exercise_self_test(window, app) -> None:
     assert window.active_route == "dashboard"
     assert window.stack.count() == 8
@@ -39,10 +47,17 @@ def _exercise_self_test(window, app) -> None:
     app.processEvents()
     assert window.active_route == "vehicle"
 
+    preview = window.vehicle_page.preview
+    preview.set_pil_image(None)
+    assert not preview.has_image
+
     plate = window.vehicle_page.pass_fields["first"]["plate"]
     plate.setText("А111АА78")
     app.processEvents()
-    assert window.vehicle_page.preview.has_image
+    assert not preview.has_image
+
+    _wait_for_preview_refresh(window, app)
+    assert preview.has_image
 
 
 def main(argv: list[str] | None = None) -> int:
