@@ -1,0 +1,51 @@
+name: Finalize static checks once
+
+on:
+  push:
+    branches: [codex/reliability-hardening]
+    paths:
+      - '.github/workflows/finalize-static-checks-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: codex/reliability-hardening
+      - name: Normalize targeted Bandit suppressions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("getpass_core/storage.py")
+          text = path.read_text(encoding="utf-8")
+          suffixes = [
+              "# nosec B608 -- identifiers come from validated JournalSchema",
+              "# nosec B608 -- validated schema table",
+              "# nosec B608 -- table is validated; ids remain parameterized",
+              "# nosec B608 -- assignments are allowlisted schema keys",
+          ]
+          for suffix in suffixes:
+              text = text.replace(suffix, "# nosec B608")
+          path.write_text(text, encoding="utf-8")
+          PY
+      - name: Run strict style and security checks
+        run: |
+          python -m pip install 'flake8>=7.3.0' 'autopep8>=2.3.2' 'bandit>=1.9.4'
+          autopep8 --in-place --recursive \
+            --select=E127,E128,E231,E303,E306,E501,W292 \
+            --max-line-length=127 getpass_core getpass_ui tests
+          flake8 . --count --max-line-length=127 --show-source --statistics
+          python -m bandit -r getpass_core getpass_ui -ll
+          python -m compileall -q getpass_core getpass_ui tests
+      - name: Commit cleanup and remove one-shot workflow
+        run: |
+          git rm .github/workflows/finalize-static-checks-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add getpass_core getpass_ui tests
+          git commit -m "style: prepare strict static checks"
+          git push origin HEAD:codex/reliability-hardening
