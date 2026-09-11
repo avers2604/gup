@@ -54,6 +54,26 @@ def test_prepare_failure_removes_copied_photo_and_keeps_input_unchanged(
     assert not photo_dir.exists() or list(photo_dir.iterdir()) == []
 
 
+def test_prepare_cleans_previous_photo_when_later_photo_is_invalid(
+    journal, data_dir, tmp_path
+):
+    good = tmp_path / "good.jpg"
+    _make_photo(good)
+    missing = tmp_path / "missing.jpg"
+    records = [
+        {"num": "1", "plate": "A111AA78", "photo_path": str(good)},
+        {"num": "2", "plate": "B222BB78", "photo_path": str(missing)},
+    ]
+    original = [dict(record) for record in records]
+
+    with pytest.raises(ValueError):
+        issuance.prepare(journal, records, "printer")
+
+    assert records == original
+    photo_dir = data_dir / "photos"
+    assert not photo_dir.exists() or list(photo_dir.iterdir()) == []
+
+
 def test_confirm_rejects_non_prepared_unknown_state(journal):
     operation_id = issuance.prepare(
         journal, [{"num": "1", "plate": "A111AA78"}], "printer"
