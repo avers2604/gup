@@ -321,36 +321,42 @@ class Journal:
             [tuple(rec.get(k, "") for k in cols) for rec in records],
         )
 
+    def _read_legacy_rows(self, path: str) -> list[list[str]]:
+        try:
+            with open(path, "r", encoding="utf-8-sig", newline="") as f:
+                return list(csv.reader(f, delimiter=";"))
+        except (OSError, UnicodeError, csv.Error) as exc:
+            raise ValueError(f"Не удалось перенести старый журнал: {path}") from exc
+
+    @staticmethod
+    def _legacy_row_has_values(raw) -> bool:
+        return any((cell or "").strip() for cell in raw)
+
+    def _legacy_layout(self, raw, keys):
+        return keys or self.schema.legacy_layouts.get(len(raw)) or self.schema.keys
+
+    def _legacy_record(self, raw, layout) -> dict:
+        record = {key: "" for key in self.schema.keys}
+        for index, key in enumerate(layout):
+            if key in record and index < len(raw):
+                record[key] = (raw[index] or "").strip()
+        record["id"] = record.get("id") or new_id()
+        record["status"] = record.get("status") or STATUS_ACTIVE
+        return record
+
     def _read_legacy_csv(self) -> list[dict]:
         path = self.schema.csv_path
         if not os.path.exists(path):
             return []
-        try:
-            with open(path, "r", encoding="utf-8-sig", newline="") as f:
-                rows = list(csv.reader(f, delimiter=";"))
-        except (OSError, UnicodeError, csv.Error) as exc:
-            raise ValueError(f"Не удалось перенести старый журнал: {path}") from exc
+        rows = self._read_legacy_rows(path)
         if len(rows) < 2:
             return []
-        header, body = rows[0], rows[1:]
-        keys = self._keys_for(header)
-        records = []
-        for raw in body:
-            if not any((c or "").strip() for c in raw):
-                continue
-            rec = {k: "" for k in self.schema.keys}
-            layout = keys or self.schema.legacy_layouts.get(len(raw))
-            if layout is None:
-                layout = self.schema.keys
-            for i, key in enumerate(layout):
-                if key in rec and i < len(raw):
-                    rec[key] = (raw[i] or "").strip()
-            if not rec.get("id"):
-                rec["id"] = new_id()
-            if not rec.get("status"):
-                rec["status"] = STATUS_ACTIVE
-            records.append(rec)
-        return records
+        keys = self._keys_for(rows[0])
+        return [
+            self._legacy_record(raw, self._legacy_layout(raw, keys))
+            for raw in rows[1:]
+            if self._legacy_row_has_values(raw)
+        ]
 
     def _keys_for(self, header) -> list[str] | None:
         titles = {f.title.strip().lower(): f.key for f in self.schema.fields}
