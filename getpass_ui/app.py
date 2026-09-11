@@ -1088,7 +1088,11 @@ class App:
             if not password:
                 return
         try:
-            accepted, skipped = getpass_core.backup.inspect_backup(path, password=password)
+            accepted, skipped = run_task(
+                self.root,
+                lambda: getpass_core.backup.inspect_backup(path, password=password),
+                "Проверка резервной копии",
+            )
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось прочитать архив: {exc}")
             return
@@ -1104,7 +1108,11 @@ class App:
                 f"Текущие данные будут перезаписаны.{note}\n\nПродолжить?"):
             return
         try:
-            restored, _ = getpass_core.backup.restore_backup(path, password=password)
+            restored, _ = run_task(
+                self.root,
+                lambda: getpass_core.backup.restore_backup(path, password=password),
+                "Восстановление данных",
+            )
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось восстановить: {exc}")
             return

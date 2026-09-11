@@ -396,9 +396,23 @@ class Journal:
 
     def delete_ids(self, ids) -> list[dict]:
         id_set = set(ids)
-        current = [r for r in self.read() if r.get("id") not in id_set]
-        self.write(current)
-        return current
+        if not id_set:
+            return self.read()
+        conn = self._connect()
+        try:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                placeholders = ", ".join("?" for _ in id_set)
+                conn.execute(
+                    f'DELETE FROM "{self.schema.table}" '
+                    f'WHERE id IN ({placeholders})',
+                    tuple(id_set),
+                )
+        except sqlite3.OperationalError as exc:
+            raise FileBusy(config.DB_FILE) from exc
+        finally:
+            conn.close()
+        return self.read()
 
     def revoke_ids(self, ids, reason: str, when: str = "") -> list[dict]:
         when = when or datetime.now().strftime(DATE_FMT)
