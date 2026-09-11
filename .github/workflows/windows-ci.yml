@@ -34,6 +34,9 @@ jobs:
       - name: Run tests on Windows
         run: python -m pytest
 
+      - name: Smoke-test Qt preview from source
+        run: python -m getpass_qt --self-test
+
       - name: Build unsigned EXE
         shell: pwsh
         run: |
@@ -62,6 +65,30 @@ jobs:
             throw 'Smoke test timed out'
           }
           if ($check.ExitCode -ne 0) { throw 'Smoke test failed' }
+
+      - name: Build Qt preview EXE
+        shell: pwsh
+        run: |
+          $args = @(
+            '--noconfirm',
+            '--clean',
+            '--onefile',
+            '--windowed',
+            '--icon', 'app_icon.ico',
+            '--name', 'GET-Passes-Qt-Preview'
+          )
+          if (Test-Path 'app_icon.ico') { $args += @('--add-data', 'app_icon.ico;.') }
+          python -m PyInstaller @args 'getpass_qt\__main__.py'
+
+      - name: Smoke-test packaged Qt preview
+        shell: pwsh
+        run: |
+          $check = Start-Process -FilePath 'dist\GET-Passes-Qt-Preview.exe' -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
+          if (-not $check.WaitForExit(60000)) {
+            $check.Kill()
+            throw 'Qt preview smoke test timed out'
+          }
+          if ($check.ExitCode -ne 0) { throw 'Qt preview smoke test failed' }
 
       - name: Build Inno Setup installer
         shell: pwsh
