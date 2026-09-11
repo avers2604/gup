@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -114,3 +115,68 @@ def test_batch_pdf_failure_cancels_unusable_operation(journal, monkeypatch, tmp_
         )
 
     assert issuance.pending(journal) == []
+
+
+def test_single_pass_save_failure_cancels_prepared_operation(
+    journal, monkeypatch, tmp_path
+):
+    from tkinter import filedialog, messagebox
+    import getpass_ui.app as app_module
+
+    output = tmp_path / "pass.pdf"
+    records = [{"num": "1", "plate": "A111AA78"}]
+    fake = SimpleNamespace(
+        _issuance_id=None,
+        build_documents=lambda: (
+            object(),
+            None,
+            "pass",
+            records,
+            SimpleNamespace(value="2"),
+        ),
+        _finish_pass=lambda *_args: True,
+    )
+    monkeypatch.setattr(app_module, "PASS_JOURNAL", journal)
+    monkeypatch.setattr(
+        filedialog, "asksaveasfilename", lambda *args, **kwargs: str(output)
+    )
+    monkeypatch.setattr(
+        app_module.printing,
+        "save_document",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+    monkeypatch.setattr(messagebox, "showerror", lambda *args, **kwargs: None)
+
+    app_module.App.generate_pass(fake)
+
+    assert issuance.pending(journal) == []
+
+
+def test_badge_save_failure_cancels_prepared_operation(data_dir, monkeypatch, tmp_path):
+    from tkinter import filedialog, messagebox
+    from getpass_core import storage
+    import getpass_ui.badge_tab as badge_module
+
+    output = tmp_path / "badge.pdf"
+    badge_journal = storage.Journal(storage.BADGE_SCHEMA)
+    data = {"tab_num": "100", "surname": "ИВАНОВ", "name": "ИВАН"}
+    fake = SimpleNamespace(
+        _issuance_id=None,
+        validated_data=lambda: data,
+        build_document=lambda _data: (object(), "badge"),
+        _finish=lambda _data: "101",
+    )
+    monkeypatch.setattr(badge_module, "BADGE_JOURNAL", badge_journal)
+    monkeypatch.setattr(
+        filedialog, "asksaveasfilename", lambda *args, **kwargs: str(output)
+    )
+    monkeypatch.setattr(
+        badge_module.printing,
+        "save_document",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+    monkeypatch.setattr(messagebox, "showerror", lambda *args, **kwargs: None)
+
+    badge_module.BadgePanel.generate_pdf(fake)
+
+    assert issuance.pending(badge_journal) == []
