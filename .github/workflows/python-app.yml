@@ -20,6 +20,8 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
     strategy:
       matrix:
         python: ["3.13", "3.14"]
@@ -31,12 +33,12 @@ jobs:
       with:
         python-version: ${{ matrix.python }}
 
-    # Xvfb и библиотеки Tk нужны, чтобы прогонять проверки интерфейса
-    # без монитора: именно они ловят «форма построилась, но не видна».
+    # Xvfb/Tk сохраняют проверки legacy UI; libEGL нужен PySide6/QtGui
+    # даже при offscreen-платформе на Linux runner.
     - name: Install system packages for headless GUI tests
       run: |
         sudo apt-get update -qq
-        sudo apt-get install -y --no-install-recommends xvfb tk
+        sudo apt-get install -y --no-install-recommends xvfb tk libegl1
 
     - name: Install dependencies
       run: |
@@ -51,10 +53,10 @@ jobs:
     - name: Lint with flake8
       run: |
         # Ошибки pycodestyle/pyflakes блокируют сборку.
-        flake8 pass_generator.py getpass_core getpass_ui tests \
+        flake8 pass_generator.py getpass_core getpass_ui getpass_app getpass_design getpass_qt tests tools \
           --count --max-line-length=127 --show-source --statistics
         # Цикломатическая сложность выше 10 тоже блокирует сборку.
-        flake8 pass_generator.py getpass_core getpass_ui tests \
+        flake8 pass_generator.py getpass_core getpass_ui getpass_app getpass_design getpass_qt tests tools \
           --count --select=C901 --max-complexity=10 --statistics
 
     - name: Test with pytest
@@ -63,4 +65,4 @@ jobs:
     - name: Dependency audit
       run: python -m pip_audit -r requirements.txt
     - name: Security analysis
-      run: python -m bandit -r getpass_core getpass_ui -ll
+      run: python -m bandit -r getpass_core getpass_ui getpass_app getpass_design getpass_qt -ll

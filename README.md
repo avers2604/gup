@@ -19,6 +19,34 @@ python pass_generator.py
 
 Требуется Python 3.13 или 3.14 с `tkinter` (релизная сборка использует Python 3.14.7).
 
+## PySide6 preview (GET-Passes 2.0 migration)
+
+На Phase 1 production entry point остаётся текущим Tkinter-приложением:
+
+```bash
+python pass_generator.py
+```
+
+Новый PySide6 shell запускается отдельно и предназначен для разработки и
+проверки миграции GET-Passes 2.0:
+
+```bash
+python -m getpass_qt
+```
+
+Headless/self-test нового shell:
+
+```bash
+python -m getpass_qt --self-test
+```
+
+PySide6 preview использует существующие GET design tokens, но пока не заменяет
+production workflows выпуска пропусков. Печатные пропуска и бейджи продолжают
+создаваться существующим renderer; Phase 1 не меняет SQLite schema, внешний вид
+печатных форм, release pipeline или production installer. В Windows CI отдельно
+собирается `GET-Passes-Qt-Preview.exe`, который не подписывается, не публикуется
+как production release и не устанавливается через Inno Setup.
+
 ## Сборка в один EXE
 
 > Для выпуска единым исполняемым файлом лучше собирать проект на Windows, потому что приложение использует Tkinter и оконный режим.
@@ -119,14 +147,15 @@ pyinstaller --noconfirm --clean --onefile --windowed --icon app_icon.ico --name 
 
 ## Дизайн-система
 
-`getpass_ui/tokens.py` + `getpass_ui/theme.py` — переносимая дизайн-система
-на палитре брендбука ГЭТ (тёмно-синий/тил/красный/жёлтый), без внешних зависимостей
-кроме Pillow. `tokens.py` — только константы (цвета, отступы, типографика,
-радиусы), `theme.py` — движок, превращающий их в стили ttk и виджеты
-(`Card`, скруглённые 9-patch кнопки/поля, светлая/тёмная палитра).
-`getpass_ui/components.py` собирает поверх них готовые элементы форм
-(`Field`, `AutocompleteEntry`). Оба модуля рассчитаны на копирование
-в другие программы ГЭТ как есть.
+Базовые GET-токены вынесены в presentation-neutral `getpass_design/tokens.py`.
+`getpass_ui/tokens.py` сохраняет совместимость Tkinter-кода через re-export,
+`getpass_ui/theme.py` строит ttk-стили, а `getpass_qt/theme.py` формирует QSS
+для PySide6. Палитра остаётся брендовой: тёмно-синий/тил/красный/жёлтый,
+с общими отступами, типографикой и радиусами.
+
+`getpass_ui/components.py` собирает готовые Tkinter-элементы форм (`Field`,
+`AutocompleteEntry`). PySide6 shell использует те же семантические токены,
+не вводя отдельную независимую палитру.
 
 ## Файлы рядом с программой
 
@@ -165,32 +194,35 @@ pyinstaller --noconfirm --clean --onefile --windowed --icon app_icon.ico --name 
 ## Структура
 
 ```
-pass_generator.py     точка входа
-getpass_core/         предметная логика, без Tkinter — импортируется и тестируется отдельно
+pass_generator.py     production-точка входа Tkinter
+getpass_core/         предметная логика, без Tkinter/PySide6
   domain.py             даты, номера бланков, госномера
   config.py             пути, каталог данных, настройки, вычистка ПДн из crash.log
   storage.py            журналы на SQLite (единая реализация для ТС и бейджей), база машин
-  crop.py                геометрия кадрирования фотографии
-  dpi.py                 DPI-осведомлённость, масштаб под монитор
-  fonts.py               шрифты бланков, Echoes Sans, DoT Icons
-  blank.py               бланк пропуска ТС, отрисованный кодом
-  render.py              отрисовка пропуска (лицо + оборот), бейджа, листов А4
-  registry.py            печатные реестры (единая реализация)
-  pdfwriter.py           потоковая запись многостраничного PDF
-  printing.py            печать через Windows (в т.ч. двусторонняя), сохранение документов
-  backup.py              резервное копирование и восстановление
-getpass_ui/            интерфейс Tkinter
-  tokens.py               токены дизайн-системы (палитра брендбука, типографика, отступы)
-  theme.py                движок оформления: стили ttk, Card, светлая/тёмная тема
-  components.py           готовые элементы форм: Field, AutocompleteEntry
-  app.py                  главное окно
-  pass_tab.py             форма пропуска на ТС
-  badge_tab.py            форма бейджа
-  journal.py              окно журнала (одно на оба журнала, с фильтрами)
-  crop_window.py          кадрирование фотографии, овальная направляющая
-  batch.py                массовая печать
-  widgets.py              общие элементы (прокрутка, диалог прогресса)
-tests/                 автотесты
+  crop.py               геометрия кадрирования фотографии
+  dpi.py                DPI-осведомлённость, масштаб под монитор
+  fonts.py              шрифты бланков, Echoes Sans, DoT Icons
+  blank.py              бланк пропуска ТС, отрисованный кодом
+  render.py             отрисовка пропуска (лицо + оборот), бейджа, листов А4
+  registry.py           печатные реестры (единая реализация)
+  pdfwriter.py          потоковая запись многостраничного PDF
+  printing.py           печать через Windows (в т.ч. двусторонняя), сохранение документов
+  backup.py             резервное копирование и восстановление
+getpass_design/       presentation-neutral GET design tokens
+getpass_app/          UI-независимый application boundary и настройки preview
+getpass_ui/           production-интерфейс Tkinter
+  tokens.py             compatibility re-export GET-токенов
+  theme.py              движок оформления: стили ttk, Card, светлая/тёмная тема
+  components.py         готовые элементы форм: Field, AutocompleteEntry
+  app.py                главное окно
+  pass_tab.py           форма пропуска на ТС
+  badge_tab.py          форма бейджа
+  journal.py            окно журнала (одно на оба журнала, с фильтрами)
+  crop_window.py        кадрирование фотографии, овальная направляющая
+  batch.py              массовая печать
+  widgets.py            общие элементы (прокрутка, диалог прогресса)
+getpass_qt/           PySide6 Phase-1 preview shell и MVVM-lite navigation
+tests/                автотесты
 ```
 
 ## Мониторы с высоким разрешением
@@ -204,13 +236,16 @@ tests/                 автотесты
 
 ```
 pip install -r requirements-dev.txt
-python -m pytest                    # логика, хранилище, отрисовка, PDF, печать
-xvfb-run -a python -m pytest        # + headless-проверка интерфейса (Linux/CI)
-python -m pyflakes pass_generator.py getpass_core getpass_ui
+python -m pytest                    # логика, хранилище, renderer, Tkinter и PySide6 preview
+xvfb-run -a python -m pytest        # + headless-проверка интерфейсов (Linux/CI)
+python -m getpass_qt --self-test    # отдельный smoke PySide6 shell
+python pass_generator.py --self-test
 ```
 
-`pyflakes` ловит обращения к неопределённым именам до запуска — именно
-такой ошибкой (`NameError` на обработчике кнопки) программа падала раньше.
+CI дополнительно запускает strict flake8/C901 для `getpass_core`, `getpass_ui`,
+`getpass_app`, `getpass_design`, `getpass_qt`, `tests` и `tools`, dependency
+audit и Bandit. Windows PR smoke проверяет обе точки входа, отдельный Qt preview
+EXE и прежний production installer.
 
 ## Автоматическая сборка в GitHub Actions
 
@@ -236,11 +271,14 @@ python -m pyflakes pass_generator.py getpass_core getpass_ui
 звёздочкой и текстовой ошибкой, а автодополнение управляется стрелками, Enter
 и Escape. Интерфейс сохраняет читаемые размеры при масштабе Windows 125–200%.
 
-## Оценка PySide6
+## Статус миграции на PySide6
 
-Ядро `getpass_core` уже отделено от Tkinter, поэтому миграция затронет слой
-`getpass_ui`, точку входа и сборку. Рекомендуется сначала сделать прототип
-журнала на PySide6 и сравнить доступность, скорость фильтрации и размер EXE.
-Полная замена UI ориентировочно займёт 2–3 недели и оправдана при потребности
-в полноценной интеграции с экранными дикторами или больших виртуализированных
-таблицах. До такого решения текущий Tkinter-интерфейс следует поддерживать.
+Phase 1 добавляет фундамент GET-Passes 2.0 рядом с действующим интерфейсом:
+UI-независимый `getpass_app`, общие design tokens, PySide6 theme engine,
+MVVM-lite navigation, Variant-A shell и отдельную CI-only Windows preview
+сборку. Это **не production cutover**.
+
+Следующие фазы должны отдельно перенести реальные workflows пропуска ТС,
+бейджа, журналов/реестров и только затем переключать production entry point,
+PyInstaller/Inno/release pipeline. Физическая проверка на рабочем месте и
+принтере также относится к последующим фазам.

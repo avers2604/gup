@@ -3,10 +3,14 @@ name = "get-passes"
 version = "1.1.0"
 description = "Desktop pass issuance and journals"
 requires-python = ">=3.13,<3.15"
-dependencies = ["Pillow>=12.0,<13", "cryptography>=50,<51"]
+dependencies = [
+  "Pillow>=12.0,<13",
+  "cryptography>=50,<51",
+  "PySide6>=6.11,<6.12",
+]
 
 [tool.coverage.run]
-source = ["getpass_core", "getpass_ui"]
+source = ["getpass_core", "getpass_ui", "getpass_app", "getpass_design", "getpass_qt"]
 
 [tool.coverage.report]
 show_missing = true

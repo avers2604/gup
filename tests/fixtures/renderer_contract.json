@@ -1,0 +1,12 @@
+{
+  "assets/logo_get.png": "2ca9b5fc0825420e0c2d1099b737db2f1ef2b8b1",
+  "fronts/DoTIcons-Regular.otf": "09dd0e5de1c63710dd099abd804daa4fa0bae2c2",
+  "fronts/DoTIcons-Regular_2021-05-25-2.otf": "f79d6ace4f58438e18153b005c2da1aedea092de",
+  "fronts/MoscowSans-Regular.otf": "3ecd80417ed2e63e2266d9dae85c7178fdc0b11c",
+  "fronts/MoscowSansExtraBold.otf": "2c7999098ab9a20c0504e21b3ec8602669864af6",
+  "fronts/MoscowSansExtrabold-1600wt.otf": "eefa2988a057a0cb9b24a46e5e78cb537959c50f",
+  "fronts/icons.ai": "22dbf3aca480c7ab42f5ded8da1cf5cee7a73faa",
+  "getpass_core/blank.py": "c353ee58896f958a23d033d215e6179dc577bcd2",
+  "getpass_core/fonts.py": "2826b66c43849ad0ea849a7a08db183722672378",
+  "getpass_core/render.py": "2dc325bc78bcc5b9196c6776121f14b1b36cd1f8"
+}
