@@ -31,6 +31,8 @@ from .pass_tab import TERRITORIES, PassForm
 from .theme import Card, Theme
 from .tokens import RADIUS
 from .widgets import Debouncer, ProgressDialog, make_scrollable
+from .tasks import run_task
+from .navigation import create_navigation
 
 
 class App:
@@ -97,6 +99,7 @@ class App:
                 self.badge._on_crop_cancel()
 
         self._bind_hotkeys()
+        self.navigation = create_navigation(self)
         self.root.bind_all("<MouseWheel>", self._global_mousewheel)
         self.update_tab_states()
         self.root.after(200, self._startup_checks)
@@ -209,12 +212,7 @@ class App:
         menu = tk.Menu(self.root, tearoff=0, bg=th.c("surface"), fg=th.c("ink"),
                        activebackground=th.c("accent_fill"), activeforeground="#FFFFFF",
                        relief="flat", bd=0)
-        menu.add_command(label="Резервная копия", command=self.backup_database)
-        menu.add_command(label="Восстановить из копии", command=self.restore_database)
-        from .operations import open_operations
-        menu.add_command(label="Незавершённые выдачи", command=lambda: open_operations(self.root, th))
-        from .diagnostics import open_diagnostics
-        menu.add_command(label="Диагностика", command=lambda: open_diagnostics(self.root, th))
+        self.navigation.populate(menu)
         x = self._more_btn.winfo_rootx()
         y = self._more_btn.winfo_rooty() + self._more_btn.winfo_height()
         try:
@@ -853,11 +851,13 @@ class App:
             messagebox.showerror("Выдача не начата", str(exc))
             return
         if back_document is not None:
-            ok, err = printing.print_pass_two_sided(
-                document, back_document, self.printer_var.get(),
-                confirm_flip=self._confirm_flip_for_back_side)
+            printer = self.printer_var.get()
+            ok, err = run_task(self.root, lambda ask: printing.print_pass_two_sided(
+                document, back_document, printer, confirm_flip=ask),
+                "Двусторонняя печать", confirm=self._confirm_flip_for_back_side)
         else:
-            ok, err = printing.send_image_to_printer(document, self.printer_var.get())
+            printer = self.printer_var.get()
+            ok, err = run_task(self.root, lambda: printing.send_image_to_printer(document, printer), "Печать")
         if ok:
             if not self._finish_pass(records, next_num):
                 return
@@ -1063,7 +1063,7 @@ class App:
                 messagebox.showerror("Пароли не совпадают", "Копия не создана.")
                 return
         try:
-            count, size = getpass_core.backup.create_backup(path, password=password)
+            count, size = run_task(self.root, lambda: getpass_core.backup.create_backup(path, password=password), "Резервное копирование")
         except Exception as exc:
             messagebox.showerror("Ошибка", f"Не удалось создать бэкап: {exc}")
             return

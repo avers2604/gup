@@ -16,7 +16,8 @@ from getpass_core.importing import photo_in_folder, validate_items
 
 from .components import section_title
 from .theme import Card
-from .widgets import ProgressDialog
+from .tasks import run_task
+import threading
 
 PASS_TEMPLATE_HEADER = ["Номер пропуска", "Госномер", "Марка", "Модель", "Вид", "Цвет",
                         "Должность водителя", "ФИО водителя", "Телефон", "Зона допуска"]
@@ -54,12 +55,14 @@ def read_csv_rows(title):
     if not path:
         return None, None
     rows = []
+    def load_rows(encoding):
+        with open(path, "r", encoding=encoding, newline="") as stream:
+            return list(csv.reader(stream, delimiter=";"))
     # Попытка прочитать в UTF-8, при неудаче — Windows-1251 (стандарт Excel)
     encodings = ("utf-8-sig", "cp1251", "utf-8")
     for enc in encodings:
         try:
-            with open(path, "r", encoding=enc, newline="") as f:
-                rows = list(csv.reader(f, delimiter=";"))
+            rows = run_task(tk._default_root, lambda: load_rows(enc), "Чтение CSV")
             break
         except UnicodeDecodeError:
             continue
@@ -86,19 +89,19 @@ def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
     class Cancelled(Exception):
         pass
 
+    cancelled = threading.Event()
     def pages():
-        with ProgressDialog(parent, theme, title, pages_total) as dlg:
-            for idx, page in enumerate(page_builder(), start=1):
-                if dlg.cancelled:
-                    raise Cancelled()
-                dlg.step(idx, f"Готовится лист {idx} из {pages_total}...")
-                if dlg.cancelled:
-                    raise Cancelled()
-                yield page
+        for page in page_builder():
+            if cancelled.is_set():
+                raise Cancelled()
+            yield page
 
     try:
-        operation_id = issuance.prepare(journal, log_records, save_path)
-        save_pdf_pages(pages(), save_path)
+        def produce():
+            operation_id = issuance.prepare(journal, log_records, save_path)
+            save_pdf_pages(pages(), save_path)
+            return operation_id
+        operation_id = run_task(parent, produce, title, cancelled=cancelled)
     except Cancelled:
         messagebox.showinfo("Отменено", "Массовая печать прервана. Прежний файл сохранён.", parent=parent)
         return False
@@ -133,7 +136,7 @@ def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
 
 
 def review_import(parent, theme, items, journal):
-    results = validate_items(items, journal, badge="tab_num" in journal.schema.keys)
+    results = run_task(parent, lambda: validate_items(items, journal, badge="tab_num" in journal.schema.keys), "Проверка импорта")
     win = theme.toplevel(parent, "Проверка импорта")
     win.geometry("1000x600")
     win.transient(parent)

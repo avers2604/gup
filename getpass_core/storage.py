@@ -6,7 +6,6 @@ import getpass
 import json
 import os
 import re
-import shutil
 import sqlite3
 import tempfile
 import threading
@@ -18,11 +17,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from . import config
+from .migrations import SCHEMA_VERSION, migrate
 from .domain import DATE_FMT, get_excel_col_letter, parse_date, plate_key
 
 STATUS_ACTIVE = "действует"
 STATUS_REVOKED = "аннулирован"
-SCHEMA_VERSION = 2
 
 _XML_ILLEGAL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
@@ -214,15 +213,10 @@ class Journal:
         os.makedirs(os.path.dirname(config.DB_FILE) or ".", exist_ok=True)
         try:
             conn = self._connect_once()
-        except sqlite3.DatabaseError as exc:
-            snapshot = config.DB_FILE + ".healthy"
-            if not os.path.exists(snapshot):
+        except sqlite3.OperationalError as exc:
+            if getattr(exc, "sqlite_errorcode", None) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
                 raise FileBusy(config.DB_FILE) from exc
-            try:
-                shutil.copy2(snapshot, config.DB_FILE)
-                conn = self._connect_once()
-            except (OSError, sqlite3.DatabaseError) as recovery_error:
-                raise FileBusy(config.DB_FILE) from recovery_error
+            raise
         return conn
 
     def _connect_once(self) -> sqlite3.Connection:
@@ -231,13 +225,17 @@ class Journal:
         except sqlite3.OperationalError as exc:
             raise FileBusy(config.DB_FILE) from exc
 
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA synchronous = NORMAL")
-        conn.execute("PRAGMA busy_timeout = 10000")
-
-        self._ensure_table(conn)
-        self._save_healthy_snapshot(conn)
+        try:
+            if conn.execute("PRAGMA user_version").fetchone()[0] > SCHEMA_VERSION:
+                raise ValueError("База создана более новой версией программы")
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
+            conn.execute("PRAGMA busy_timeout = 10000")
+            self._ensure_table(conn)
+        except BaseException:
+            conn.close()
+            raise
         return conn
 
     def _save_healthy_snapshot(self, conn: sqlite3.Connection) -> None:
@@ -299,12 +297,7 @@ class Journal:
 
     def _migrate_schema(self, conn: sqlite3.Connection) -> None:
         """Применить явные миграции SQLite последовательно и идемпотентно."""
-        conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
-        current = int(conn.execute("PRAGMA user_version").fetchone()[0])
-        for version in range(current + 1, SCHEMA_VERSION + 1):
-            conn.execute("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-                         (version, datetime.now().astimezone().isoformat()))
-            conn.execute(f"PRAGMA user_version = {version}")
+        migrate(conn)
 
     def _event(self, conn, action, before, after):
         conn.execute("INSERT INTO journal_events (journal, record_id, action, actor, "
