@@ -155,6 +155,21 @@ def review_import(parent, theme, items, journal):
         tree.insert("", "end", values=(row, item.get("tab_num", item.get("plate", "")),
                     item.get("fio", item.get("driver_full", "")), "; ".join(err + warn) or "Готово"),
                     tags=("error",) if err else ())
+    def save_report():
+        path = filedialog.asksaveasfilename(parent=win, defaultextension=".csv",
+            filetypes=[("CSV", "*.csv")], initialfile="отчёт_импорта.csv")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8-sig", newline="") as stream:
+                writer = csv.writer(stream, delimiter=";")
+                writer.writerow(["Строка", "Номер", "Ошибки", "Предупреждения"])
+                for item, (row, err, warn) in zip(items, results):
+                    writer.writerow([row, item.get("tab_num", item.get("plate", "")),
+                                     " | ".join(err), " | ".join(warn)])
+            messagebox.showinfo("Отчёт сохранён", path, parent=win)
+        except OSError as exc:
+            messagebox.showerror("Ошибка", f"Не удалось сохранить отчёт:\n{exc}", parent=win)
     accepted = [False]
     def proceed():
         if warnings and not messagebox.askyesno("Подтвердить предупреждения",
@@ -165,6 +180,7 @@ def review_import(parent, theme, items, journal):
     bar = ttk.Frame(win)
     bar.pack(fill="x", padx=12, pady=12)
     ttk.Button(bar, text="Вернуться и исправить CSV", command=win.destroy).pack(side="left")
+    ttk.Button(bar, text="Сохранить отчёт", command=save_report).pack(side="left", padx=8)
     ttk.Button(bar, text="Сформировать PDF", command=proceed,
                state="disabled" if errors else "normal").pack(side="right")
     parent.wait_window(win)

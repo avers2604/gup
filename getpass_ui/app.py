@@ -102,6 +102,7 @@ class App:
         self.root.after(200, self._startup_checks)
         self.root.after(250, self._initial_previews)
         self.root.after(30000, self._autosave)
+        self.root.after(86400000, self._scheduled_backup)
         active_tab = self.settings.get("active_tab", 0)
         if active_tab in (0, 1):
             try:
@@ -212,6 +213,8 @@ class App:
         menu.add_command(label="Восстановить из копии", command=self.restore_database)
         from .operations import open_operations
         menu.add_command(label="Незавершённые выдачи", command=lambda: open_operations(self.root, th))
+        from .diagnostics import open_diagnostics
+        menu.add_command(label="Диагностика", command=lambda: open_diagnostics(self.root, th))
         x = self._more_btn.winfo_rootx()
         y = self._more_btn.winfo_rooty() + self._more_btn.winfo_height()
         try:
@@ -563,6 +566,11 @@ class App:
     def _autosave(self):
         self.save_settings()
         self.root.after(30000, self._autosave)
+
+    def _scheduled_backup(self):
+        """Ежедневная фоновая копия без блокировки интерфейса."""
+        threading.Thread(target=self._rotate_backups, daemon=True).start()
+        self.root.after(86400000, self._scheduled_backup)
 
     def on_closing(self):
         if messagebox.askokcancel("Выход", "Закрыть программу?\n\n"
