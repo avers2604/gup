@@ -29,6 +29,21 @@ def test_vehicle_workspace_styles_use_semantic_tokens_and_states():
     assert "QPushButton#SavePdfButton" in css
 
 
+def test_employee_badge_styles_use_semantic_tokens_and_states():
+    css = build_stylesheet("light")
+
+    assert 'QComboBox[invalid="true"]' in css
+    assert 'QPushButton#BadgePhotoButton[invalid="true"]' in css
+    assert "QFrame#BadgePhotoCard" in css
+    assert "QFrame#BadgePrintSettings" in css
+    assert "QWidget#BadgePreview" in css
+    assert "QWidget#PhotoCropCanvas" in css
+    assert "QPushButton#BadgePrintButton" in css
+    assert "QPushButton#BadgeSavePdfButton" in css
+    assert LIGHT.danger in css
+    assert LIGHT.focus in css
+
+
 def test_theme_manager_persists_toggle(qapp):
     saved = []
     service = SettingsService(
