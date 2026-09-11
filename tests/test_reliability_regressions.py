@@ -1,7 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 import threading
-import time
 
 import pytest
 
@@ -19,6 +18,39 @@ def test_cancelled_issuance_is_not_pending_and_cannot_be_confirmed(journal):
     with pytest.raises(ValueError, match="отмен"):
         issuance.confirm(journal, operation_id)
     assert journal.read() == []
+
+
+def test_batch_cancel_marks_prepared_issuance_cancelled(journal, monkeypatch, tmp_path):
+    from tkinter import filedialog, messagebox
+    import getpass_ui.batch as batch
+
+    output = tmp_path / "batch.pdf"
+    monkeypatch.setattr(batch, "review_import", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        filedialog, "asksaveasfilename", lambda *args, **kwargs: str(output)
+    )
+    monkeypatch.setattr(messagebox, "showinfo", lambda *args, **kwargs: None)
+
+    def cancel_before_work(_parent, work, _title, cancelled=None, **_kwargs):
+        cancelled.set()
+        return work()
+
+    monkeypatch.setattr(batch, "run_task", cancel_before_work)
+
+    result = batch.run_batch(
+        object(),
+        None,
+        "Массовая печать",
+        [{"num": "1"}],
+        lambda: iter([object()]),
+        1,
+        journal,
+        [{"num": "1", "plate": "A111AA78"}],
+        "batch.pdf",
+    )
+
+    assert result is False
+    assert issuance.pending(journal) == []
 
 
 def test_delete_ids_preserves_record_added_during_delete(journal, monkeypatch):
@@ -40,11 +72,15 @@ def test_delete_ids_preserves_record_added_during_delete(journal, monkeypatch):
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(journal.delete_ids, [victim])
         if replacement_started.wait(0.5):
-            journal.append_many([{"id": "concurrent", "num": "3", "plate": "C333CC78"}])
+            journal.append_many([
+                {"id": "concurrent", "num": "3", "plate": "C333CC78"}
+            ])
             allow_replacement.set()
         else:
             # Atomic implementations do not enter the legacy table-replacement path.
-            journal.append_many([{"id": "concurrent", "num": "3", "plate": "C333CC78"}])
+            journal.append_many([
+                {"id": "concurrent", "num": "3", "plate": "C333CC78"}
+            ])
         future.result(timeout=5)
 
     ids = {record["id"] for record in journal.read()}
@@ -73,7 +109,9 @@ def test_restore_database_runs_archive_work_outside_ui_thread(monkeypatch, tmp_p
         with ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(work).result(timeout=5)
 
-    monkeypatch.setattr(filedialog, "askopenfilename", lambda *args, **kwargs: str(archive))
+    monkeypatch.setattr(
+        filedialog, "askopenfilename", lambda *args, **kwargs: str(archive)
+    )
     monkeypatch.setattr(messagebox, "askyesno", lambda *args, **kwargs: True)
     monkeypatch.setattr(messagebox, "showerror", lambda *args, **kwargs: None)
     monkeypatch.setattr(messagebox, "showwarning", lambda *args, **kwargs: None)
