@@ -26,14 +26,6 @@ class _VarStub:
         return self.value
 
 
-class _RestoreSpy:
-    def __init__(self):
-        self.calls = []
-
-    def restore(self, data):
-        self.calls.append(data)
-
-
 def test_pass_autocomplete_reuses_only_vehicle_fields(monkeypatch):
     """История госномера не должна переносить персональные данные старого пропуска."""
     from getpass_ui import pass_tab
@@ -76,25 +68,34 @@ def test_pass_autocomplete_reuses_only_vehicle_fields(monkeypatch):
     assert changes == [True]
 
 
-def test_pass_drafts_are_not_restored_on_startup():
-    """Старые черновики ТС не должны автоматически попадать в оба новых пропуска."""
-    from getpass_ui.app import App
+def test_pass_restore_ignores_legacy_vehicle_draft():
+    """Сохранённый ранее draft ТС не должен заполнять новый пропуск при старте."""
+    from getpass_ui.pass_tab import PassForm
 
-    app = App.__new__(App)
-    app.settings = {
-        "draft": {
-            "p1": {"plate": "А111АА78", "d_fio": "Старый водитель 1"},
-            "p2": {"plate": "В222ВВ78", "d_fio": "Старый водитель 2"},
-            "badge": {},
-        }
-    }
-    app.p1 = _RestoreSpy()
-    app.p2 = _RestoreSpy()
+    form = PassForm.__new__(PassForm)
+    form.plate_var = _VarStub("")
+    form.brand = _FieldStub()
+    form.model = _FieldStub()
+    form.type = _FieldStub()
+    form.color = _FieldStub()
+    form.d_pos = _FieldStub()
+    form.d_fio = _FieldStub()
+    form.d_phone = _FieldStub()
+    form.territory = _FieldStub()
 
-    app._restore_draft_state()
+    form.restore({
+        "plate": "А111АА78",
+        "brand": "Старая марка",
+        "d_fio": "Старый водитель",
+        "phone": "+7 999 111-22-33",
+        "territory": "Старая зона",
+    })
 
-    assert app.p1.calls == []
-    assert app.p2.calls == []
+    assert form.plate_var.get() == ""
+    assert form.brand.get() == ""
+    assert form.d_fio.get() == ""
+    assert form.d_phone.get() == ""
+    assert form.territory.get() == ""
 
 
 def test_otb_signature_captions_are_close_to_the_line(monkeypatch):
