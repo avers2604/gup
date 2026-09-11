@@ -42,11 +42,16 @@ class App:
         setup_ui_font()
         self.settings = config.load_settings()
         config.harden_data_dir()
+        self._initialize_root()
+        self._initialize_theme()
+        self._build_main_content()
+        self._restore_draft_state()
+        self._initialize_runtime()
 
+    def _initialize_root(self):
         enable_dpi_awareness()
         self.root = tk.Tk()
         self.root.title("СПб ГУП «Горэлектротранс» — Система выпуска пропусков и бейджей")
-
         self.scale = apply_scaling(self.root)
         default_w, default_h = scaled(1500, self.scale), scaled(920, self.scale)
         saved_w, saved_h = self._parse_geometry(self.settings.get("window_geometry", ""))
@@ -54,50 +59,59 @@ class App:
         self.root.geometry(f"{win_w}x{win_h}")
         self.root.minsize(min(win_w, scaled(1000, self.scale)),
                           min(win_h, scaled(660, self.scale)))
-        if os.path.exists(config.ICON_FILE):
-            try:
-                self.root.iconbitmap(config.ICON_FILE)
-            except Exception:
-                pass
+        self._set_window_icon()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.root.report_callback_exception = self._on_callback_exception
 
+    def _set_window_icon(self):
+        if not os.path.exists(config.ICON_FILE):
+            return
+        try:
+            self.root.iconbitmap(config.ICON_FILE)
+        except Exception:
+            pass
+
+    def _initialize_theme(self):
         palette = self.settings.get("theme", "light")
         self.theme = Theme(self.root, palette, self.scale)
         set_titlebar_theme(self.root, self.theme.is_dark)
         verify_ui_family(self.root)
         self.theme.apply_window(self.root)
 
+    def _build_main_content(self):
         self._build_header()
         self._build_system_bar()
-
         self.main_frame = tk.Frame(self.root, bg=self.theme.c("ground"))
         self.main_frame.pack(fill="both", expand=True, padx=self.theme.sp(3),
                              pady=(0, self.theme.sp(3)))
         self.notebook = ttk.Notebook(self.main_frame)
         self.notebook.pack(fill="both", expand=True)
-
         self.preview = Debouncer(self.root, self._render_preview, 150)
         self._build_pass_tab()
         self.badge = BadgePanel(self.notebook, self.settings, self.root, self.theme)
         self.badge.bind_app(self)
-        draft = self.settings.get("draft")
-        if isinstance(draft, dict):
-            for name in ("p1", "p2"):
-                if isinstance(draft.get(name), dict):
-                    getattr(self, name).restore(draft[name])
-            badge = draft.get("badge", {})
-            if isinstance(badge, dict) and badge:
-                self.badge.tab_num.set(badge.get("tab_num", ""))
-                for var, key in ((self.badge.sur_var, "surname"), (self.badge.nam_var, "name"),
-                                 (self.badge.pat_var, "patronymic")):
-                    var.set(badge.get(key, ""))
-                for field, key in ((self.badge.role, "role"), (self.badge.phone, "phone"),
-                                   (self.badge.issue, "issue_date"), (self.badge.valid, "valid_until")):
-                    field.set(badge.get(key, ""))
-                self.badge.photo_path = badge.get("photo_path")
-                self.badge._on_crop_cancel()
 
+    def _restore_draft_state(self):
+        draft = self.settings.get("draft")
+        if not isinstance(draft, dict):
+            return
+        for name in ("p1", "p2"):
+            if isinstance(draft.get(name), dict):
+                getattr(self, name).restore(draft[name])
+        badge = draft.get("badge", {})
+        if not isinstance(badge, dict) or not badge:
+            return
+        self.badge.tab_num.set(badge.get("tab_num", ""))
+        for var, key in ((self.badge.sur_var, "surname"), (self.badge.nam_var, "name"),
+                         (self.badge.pat_var, "patronymic")):
+            var.set(badge.get(key, ""))
+        for field, key in ((self.badge.role, "role"), (self.badge.phone, "phone"),
+                           (self.badge.issue, "issue_date"), (self.badge.valid, "valid_until")):
+            field.set(badge.get(key, ""))
+        self.badge.photo_path = badge.get("photo_path")
+        self.badge._on_crop_cancel()
+
+    def _initialize_runtime(self):
         self._bind_hotkeys()
         self.navigation = create_navigation(self)
         self.root.bind_all("<MouseWheel>", self._global_mousewheel)
@@ -840,29 +854,24 @@ class App:
         messagebox.showinfo("Готово",
                             f"Документ сформирован!\nСледующий номер: {next_num.value}")
 
-    def direct_print_pass(self):
-        built = self.build_documents()
-        if not built:
-            return
-        document, back_document, prefix, records, next_num = built
-        try:
-            self._issuance_id = issuance.prepare(PASS_JOURNAL, records, self.printer_var.get())
-        except Exception as exc:
-            messagebox.showerror("Выдача не начата", str(exc))
-            return
+    def _send_pass_to_printer(self, document, back_document, printer):
         if back_document is not None:
-            printer = self.printer_var.get()
-            ok, err = run_task(self.root, lambda ask: printing.print_pass_two_sided(
-                document, back_document, printer, confirm_flip=ask),
-                "Двусторонняя печать", confirm=self._confirm_flip_for_back_side)
-        else:
-            printer = self.printer_var.get()
-            ok, err = run_task(self.root, lambda: printing.send_image_to_printer(document, printer), "Печать")
-        if ok:
-            if not self._finish_pass(records, next_num):
-                return
-            messagebox.showinfo("Печать", "Документ успешно отправлен на принтер!")
-            return
+            return run_task(
+                self.root,
+                lambda ask: printing.print_pass_two_sided(
+                    document, back_document, printer, confirm_flip=ask
+                ),
+                "Двусторонняя печать",
+                confirm=self._confirm_flip_for_back_side,
+            )
+        return run_task(
+            self.root,
+            lambda: printing.send_image_to_printer(document, printer),
+            "Печать",
+        )
+
+    @staticmethod
+    def _open_manual_print_copy(document, back_document, prefix):
         temp_pdf = os.path.join(config.DATA_DIR, f"_print_{prefix}.pdf")
         try:
             if back_document is not None:
@@ -870,14 +879,39 @@ class App:
             else:
                 printing.save_document(document, temp_pdf)
             os.startfile(temp_pdf)  # noqa: Windows only
-            opened = True
+            return True
         except Exception:
-            opened = False
-        if messagebox.askyesno(
-                "Принтер не ответил",
-                f"Не удалось напечатать напрямую.\n{err or ''}\n\n"
-                + ("Документ открыт — напечатайте вручную (Ctrl+P).\n\n" if opened else "")
-                + "Считать пропуск выданным и записать в журнал?"):
+            return False
+
+    @staticmethod
+    def _confirm_manual_issuance(err, opened):
+        opened_note = "Документ открыт — напечатайте вручную (Ctrl+P).\n\n" if opened else ""
+        return messagebox.askyesno(
+            "Принтер не ответил",
+            f"Не удалось напечатать напрямую.\n{err or ''}\n\n"
+            + opened_note
+            + "Считать пропуск выданным и записать в журнал?",
+        )
+
+    def direct_print_pass(self):
+        built = self.build_documents()
+        if not built:
+            return
+        document, back_document, prefix, records, next_num = built
+        printer = self.printer_var.get()
+        try:
+            self._issuance_id = issuance.prepare(PASS_JOURNAL, records, printer)
+        except Exception as exc:
+            messagebox.showerror("Выдача не начата", str(exc))
+            return
+        ok, err = self._send_pass_to_printer(document, back_document, printer)
+        if ok:
+            if not self._finish_pass(records, next_num):
+                return
+            messagebox.showinfo("Печать", "Документ успешно отправлен на принтер!")
+            return
+        opened = self._open_manual_print_copy(document, back_document, prefix)
+        if self._confirm_manual_issuance(err, opened):
             self._finish_pass(records, next_num)
 
     def _confirm_flip_for_back_side(self) -> bool:

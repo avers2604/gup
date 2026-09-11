@@ -32,6 +32,10 @@ BADGE_TEMPLATE_SAMPLE = ["01035", "ИВАНОВ", "ИВАН", "ИВАНОВИЧ"
                          "", ""]
 
 
+class _BatchCancelled(Exception):
+    pass
+
+
 def export_template(header, sample, initial_name, note=""):
     path = filedialog.asksaveasfilename(defaultextension=".csv",
                                         filetypes=[("CSV", "*.csv")],
@@ -60,7 +64,6 @@ def read_csv_rows(title):
         with open(path, "r", encoding=encoding, newline="") as stream:
             return list(csv.reader(stream, delimiter=";"))
 
-    # Попытка прочитать в UTF-8, при неудаче — Windows-1251 (стандарт Excel)
     encodings = ("utf-8-sig", "cp1251", "utf-8")
     for enc in encodings:
         try:
@@ -81,6 +84,73 @@ def read_csv_rows(title):
     return path, rows[1:] if len(rows) > 1 else []
 
 
+def _cancellable_pages(page_builder, cancelled):
+    for page in page_builder():
+        if cancelled.is_set():
+            raise _BatchCancelled()
+        yield page
+
+
+def _prepare_batch_pdf(journal, log_records, save_path, page_builder, cancelled):
+    operation_id = issuance.prepare(journal, log_records, save_path)
+    try:
+        save_pdf_pages(_cancellable_pages(page_builder, cancelled), save_path)
+    except _BatchCancelled:
+        issuance.cancel(journal, operation_id)
+        raise
+    return operation_id
+
+
+def _run_batch_pdf_task(parent, title, journal, log_records, save_path, page_builder):
+    cancelled = threading.Event()
+    return run_task(
+        parent,
+        lambda: _prepare_batch_pdf(
+            journal,
+            log_records,
+            save_path,
+            page_builder,
+            cancelled,
+        ),
+        title,
+        cancelled=cancelled,
+    )
+
+
+def _confirm_batch_operation(parent, journal, operation_id, log_records) -> bool:
+    try:
+        issuance.confirm(journal, operation_id)
+    except FileBusy as exc:
+        messagebox.showerror(
+            "Журнал не обновлён",
+            f"PDF сохранён, но «{os.path.basename(exc.path)}» занят другой программой.\n"
+            f"Закройте его и повторите — записи ({len(log_records)} шт.) не попали в журнал.",
+            parent=parent,
+        )
+        return False
+    except Exception as exc:
+        messagebox.showerror(
+            "Журнал не обновлён",
+            f"PDF сохранён, но журнал не записан:\n{exc}",
+            parent=parent,
+        )
+        return False
+    return True
+
+
+def _offer_open_batch_file(parent, save_path, item_count):
+    if not messagebox.askyesno(
+        "Готово",
+        f"Обработано записей: {item_count}.\n\nОткрыть файл?",
+        parent=parent,
+    ):
+        return
+    try:
+        os.startfile(save_path)  # noqa: Windows only
+    except Exception:
+        pass
+
+
 def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
               log_records, default_name):
     if not review_import(parent, theme, items, journal):
@@ -91,29 +161,11 @@ def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
     if not save_path:
         return False
 
-    class Cancelled(Exception):
-        pass
-
-    cancelled = threading.Event()
-
-    def pages():
-        for page in page_builder():
-            if cancelled.is_set():
-                raise Cancelled()
-            yield page
-
     try:
-        def produce():
-            operation_id = issuance.prepare(journal, log_records, save_path)
-            try:
-                save_pdf_pages(pages(), save_path)
-            except Cancelled:
-                issuance.cancel(journal, operation_id)
-                raise
-            return operation_id
-
-        operation_id = run_task(parent, produce, title, cancelled=cancelled)
-    except Cancelled:
+        operation_id = _run_batch_pdf_task(
+            parent, title, journal, log_records, save_path, page_builder
+        )
+    except _BatchCancelled:
         messagebox.showinfo(
             "Отменено",
             "Массовая печать прервана. Прежний файл сохранён.",
@@ -127,27 +179,9 @@ def run_batch(parent, theme, title, items, page_builder, pages_total, journal,
         messagebox.showerror("Ошибка", f"Не удалось сохранить PDF:\n{exc}", parent=parent)
         return False
 
-    try:
-        issuance.confirm(journal, operation_id)
-    except FileBusy as exc:
-        messagebox.showerror(
-            "Журнал не обновлён",
-            f"PDF сохранён, но «{os.path.basename(exc.path)}» занят другой программой.\n"
-            f"Закройте его и повторите — записи ({len(log_records)} шт.) не попали в журнал.",
-            parent=parent,
-        )
+    if not _confirm_batch_operation(parent, journal, operation_id, log_records):
         return False
-    except Exception as exc:
-        messagebox.showerror("Журнал не обновлён",
-                             f"PDF сохранён, но журнал не записан:\n{exc}", parent=parent)
-        return False
-
-    if messagebox.askyesno("Готово", f"Обработано записей: {len(items)}.\n\nОткрыть файл?",
-                           parent=parent):
-        try:
-            os.startfile(save_path)  # noqa: Windows only
-        except Exception:
-            pass
+    _offer_open_batch_file(parent, save_path, len(items))
     return True
 
 

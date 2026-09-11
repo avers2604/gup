@@ -168,6 +168,38 @@ class JournalWindow:
             self.tree.heading(f.key, text=f.title + arrow)
         self.apply_filter()
 
+    def _matches_extra_filters(self, rec, extras) -> bool:
+        for key, value in extras.items():
+            if not value:
+                continue
+            cell = rec.get(key) or ""
+            kind = _EXTRA_FILTERS[key][0]
+            if kind == "combobox" and cell != value:
+                return False
+            if kind != "combobox" and value.lower() not in cell.lower():
+                return False
+        return True
+
+    def _matches_record(self, rec, query, mode, d_from, d_to, extras, today):
+        if query and not any(query in str(value).lower() for value in rec.values()):
+            return False, None
+        state = self._state_of(rec, today)
+        if mode != "all" and state != mode:
+            return False, state
+        issue = parse_date(rec.get("issue_date"))
+        if d_from and (issue is None or issue.date() < d_from.date()):
+            return False, state
+        if d_to and (issue is None or issue.date() > d_to.date()):
+            return False, state
+        return self._matches_extra_filters(rec, extras), state
+
+    def _insert_filtered_record(self, rec, state, shown):
+        start = self.page * self.page_size
+        if not start <= shown < start + self.page_size:
+            return
+        values = [self._display(rec, field.key, state) for field in self.visible_fields]
+        self.tree.insert("", "end", iid=rec["id"], values=values, tags=(state,))
+
     def apply_filter(self, *_args):
         if _args:
             self.page = 0
@@ -175,39 +207,17 @@ class JournalWindow:
         mode = self.filter_var.get()
         d_from = parse_date(self.date_from.get())
         d_to = parse_date(self.date_to.get())
-        extras = {k: w.get().strip() for k, w in self._extra_widgets.items()}
+        extras = {key: widget.get().strip() for key, widget in self._extra_widgets.items()}
         today = datetime.now().date()
         self.tree.delete(*self.tree.get_children())
         shown = 0
         for rec in self.records:
-            if query and not any(query in str(v).lower() for v in rec.values()):
+            matches, state = self._matches_record(
+                rec, query, mode, d_from, d_to, extras, today
+            )
+            if not matches:
                 continue
-            state = self._state_of(rec, today)
-            if mode != "all" and state != mode:
-                continue
-            issue = parse_date(rec.get("issue_date"))
-            if d_from and (issue is None or issue.date() < d_from.date()):
-                continue
-            if d_to and (issue is None or issue.date() > d_to.date()):
-                continue
-            skip = False
-            for key, val in extras.items():
-                if not val:
-                    continue
-                cell = (rec.get(key) or "")
-                kind = _EXTRA_FILTERS[key][0]
-                if kind == "combobox":
-                    if cell != val:
-                        skip = True
-                        break
-                elif val.lower() not in cell.lower():
-                    skip = True
-                    break
-            if skip:
-                continue
-            values = [self._display(rec, f.key, state) for f in self.visible_fields]
-            if self.page * self.page_size <= shown < (self.page + 1) * self.page_size:
-                self.tree.insert("", "end", iid=rec["id"], values=values, tags=(state,))
+            self._insert_filtered_record(rec, state, shown)
             shown += 1
         self.filtered_count = shown
         self.status.config(
