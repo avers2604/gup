@@ -159,20 +159,26 @@ def export_records_to_xlsx(rows, cols_def, filepath, sheet_name="Журнал"):
         '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
         '  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n'
         '  <Default Extension="xml" ContentType="application/xml"/>\n'
-        '  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>\n'
-        '  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>\n'
+        '  <Override PartName="/xl/workbook.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>\n'
+        '  <Override PartName="/xl/worksheets/sheet1.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>\n'
         '</Types>'
     )
     rels = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n'
-        '  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>\n'
+        '  <Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="xl/workbook.xml"/>\n'
         '</Relationships>'
     )
     wb_rels = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n'
-        '  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>\n'
+        '  <Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet1.xml"/>\n'
         '</Relationships>'
     )
     workbook = (
@@ -311,7 +317,7 @@ class Journal:
         col_list = ", ".join(f'"{k}"' for k in cols)
         placeholders = ", ".join("?" for _ in cols)
         conn.executemany(
-            f'INSERT INTO "{self.schema.table}" ({col_list}) VALUES ({placeholders})',  # nosec B608 -- identifiers come from validated JournalSchema
+            f'INSERT INTO "{self.schema.table}" ({col_list}) VALUES ({placeholders})',  # nosec B608
             [tuple(rec.get(k, "") for k in cols) for rec in records],
         )
 
@@ -358,7 +364,7 @@ class Journal:
     def read(self) -> list[dict]:
         conn = self._connect()
         try:
-            rows = conn.execute(f'SELECT * FROM "{self.schema.table}" ORDER BY rowid ASC').fetchall()  # nosec B608 -- validated schema table
+            rows = conn.execute(f'SELECT * FROM "{self.schema.table}" ORDER BY rowid ASC').fetchall()  # nosec B608
             return [dict(row) for row in rows]
         finally:
             conn.close()
@@ -368,7 +374,7 @@ class Journal:
         conn = self._connect()
         try:
             with conn:
-                conn.execute(f'DELETE FROM "{self.schema.table}"')  # nosec B608 -- validated schema table
+                conn.execute(f'DELETE FROM "{self.schema.table}"')  # nosec B608
                 self._insert_all(conn, records)
         except sqlite3.OperationalError as exc:
             raise FileBusy(config.DB_FILE) from exc
@@ -404,7 +410,7 @@ class Journal:
                 conn.execute("BEGIN IMMEDIATE")
                 placeholders = ", ".join("?" for _ in id_set)
                 conn.execute(
-                    f'DELETE FROM "{self.schema.table}" '  # nosec B608 -- table is validated; ids remain parameterized
+                    f'DELETE FROM "{self.schema.table}" '  # nosec B608
                     f'WHERE id IN ({placeholders})',
                     tuple(id_set),
                 )
@@ -421,13 +427,13 @@ class Journal:
             with conn:
                 conn.execute("BEGIN IMMEDIATE")
                 for record_id in set(ids):
-                    row = conn.execute(f'SELECT * FROM "{self.schema.table}" WHERE id=?',  # nosec B608 -- validated schema table
+                    row = conn.execute(f'SELECT * FROM "{self.schema.table}" WHERE id=?',  # nosec B608
                                        (record_id,)).fetchone()
                     if row is None or row["status"] == STATUS_REVOKED:
                         continue
                     before = dict(row)
                     after = dict(before, status=STATUS_REVOKED, revoked_at=when, revoke_reason=reason)
-                    conn.execute(f'UPDATE "{self.schema.table}" SET status=?, revoked_at=?, '  # nosec B608 -- validated schema table
+                    conn.execute(f'UPDATE "{self.schema.table}" SET status=?, revoked_at=?, '  # nosec B608
                                  'revoke_reason=? WHERE id=?', (STATUS_REVOKED, when, reason, record_id))
                     self._event(conn, "revoked", before, after)
         finally:
@@ -441,7 +447,7 @@ class Journal:
         try:
             with conn:
                 conn.execute("BEGIN IMMEDIATE")
-                row = conn.execute(f'SELECT * FROM "{self.schema.table}" WHERE id=?', (rec_id,)).fetchone()  # nosec B608 -- validated schema table
+                row = conn.execute(f'SELECT * FROM "{self.schema.table}" WHERE id=?', (rec_id,)).fetchone()  # nosec B608
                 if row is None:
                     raise ValueError("Запись больше не существует")
                 before = dict(row)
@@ -456,7 +462,7 @@ class Journal:
                     raise ValueError("Окончание срока раньше даты выдачи")
                 if values:
                     assignments = ', '.join(f'"{key}"=?' for key in values)
-                    conn.execute(f'UPDATE "{self.schema.table}" SET {assignments} WHERE id=?',  # nosec B608 -- assignments are allowlisted schema keys
+                    conn.execute(f'UPDATE "{self.schema.table}" SET {assignments} WHERE id=?',  # nosec B608
                                  (*values.values(), rec_id))
                     self._event(conn, "updated", before, after)
         finally:

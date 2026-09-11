@@ -1056,7 +1056,11 @@ class App:
         password = None
         if path.lower().endswith(".gupbak"):
             password = simpledialog.askstring(
-                "Пароль копии", "Не менее 12 символов. Сохраните пароль: без него восстановление невозможно.", show="*", parent=self.root)
+                "Пароль копии",
+                "Не менее 12 символов. Сохраните пароль: без него восстановление невозможно.",
+                show="*",
+                parent=self.root,
+            )
             if not password:
                 return
             repeated = simpledialog.askstring("Повторите пароль", "Повторите пароль копии", show="*", parent=self.root)
