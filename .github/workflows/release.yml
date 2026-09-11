@@ -1,18 +1,19 @@
-name: Сборка .exe
+name: Stable Windows release
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch: {}
+    tags:
+      - "v*"
 
 permissions:
   contents: write
   id-token: write
 
 jobs:
-  build:
+  release:
     runs-on: windows-latest
     env:
+      RELEASE_TAG: ${{ github.ref_name }}
       HAS_AZURE_SIGNING_SECRETS: >-
         ${{ secrets.AZURE_CLIENT_ID != '' &&
             secrets.AZURE_TENANT_ID != '' &&
@@ -24,47 +25,57 @@ jobs:
         ${{ secrets.WINDOWS_SIGN_CERT_BASE64 != '' &&
             secrets.WINDOWS_SIGN_CERT_PASSWORD != '' }}
     steps:
-      - name: Checkout
+      - name: Checkout tagged source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Установить Python
+      - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14.7"
 
-      - name: Установить зависимости
+      - name: Verify tag matches pyproject.toml
+        shell: pwsh
+        run: |
+          $match = Select-String -Path 'pyproject.toml' -Pattern '^version = "([^"]+)"$'
+          if (-not $match) { throw 'Project version not found in pyproject.toml' }
+          $version = $match.Matches[0].Groups[1].Value
+          $expectedTag = "v$version"
+          if ($env:RELEASE_TAG -ne $expectedTag) {
+            throw "Tag $env:RELEASE_TAG does not match project version $expectedTag"
+          }
+
+      - name: Require trusted signing for stable release
+        shell: pwsh
+        run: |
+          if ('${{ env.HAS_AZURE_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_WINDOWS_SIGNING_SECRETS }}' -ne 'true') {
+            throw 'Stable release requires trusted Authenticode signing secrets. See docs/SIGNING.md.'
+          }
+
+      - name: Install build dependencies
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
           python -m pip install pyinstaller==6.22.2
-          choco install innosetup -y --no-progress
+          choco install innosetup upx -y --no-progress
 
-      - name: Test on Windows before packaging
+      - name: Run full Windows tests
         run: python -m pytest
 
-      - name: Установить UPX (доп. сжатие .exe)
-        run: choco install upx -y --no-progress
-
-      - name: Собрать .exe
+      - name: Build application EXE
         shell: pwsh
         run: |
           $args = @(
-            '--noconfirm',
-            '--clean',
-            '--onefile',
-            '--windowed',
-            '--icon', 'app_icon.ico',
-            '--name', 'GET-Passes'
+            '--noconfirm', '--clean', '--onefile', '--windowed',
+            '--icon', 'app_icon.ico', '--name', 'GET-Passes'
           )
-
           if (Test-Path 'assets') { $args += @('--add-data', 'assets;assets') }
           if (Test-Path 'fonts') { $args += @('--add-data', 'fonts;fonts') }
           if (Test-Path 'fronts') { $args += @('--add-data', 'fronts;fronts') }
           if (Test-Path 'app_icon.ico') { $args += @('--add-data', 'app_icon.ico;.') }
-
           python -m PyInstaller @args 'pass_generator.py'
 
-      - name: Verify packaged application
+      - name: Self-test packaged EXE before signing
         shell: pwsh
         run: |
           $check = Start-Process -FilePath 'dist\GET-Passes.exe' -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
@@ -79,8 +90,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # Azure имеет приоритет, если настроены оба способа подписи.
-      - name: Подписать EXE сертификатом из Azure Key Vault
+      - name: Sign EXE with Azure certificate
         if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
         shell: pwsh
         env:
@@ -96,7 +106,7 @@ jobs:
           & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:AZURE_SIGN_CERT_PASSWORD" /v 'dist\GET-Passes.exe'
           if ($LASTEXITCODE -ne 0) { throw 'EXE signing failed' }
 
-      - name: Подписать EXE обычным Windows сертификатом
+      - name: Sign EXE with PFX certificate
         if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
@@ -111,16 +121,13 @@ jobs:
           & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:WINDOWS_SIGN_CERT_PASSWORD" /v 'dist\GET-Passes.exe'
           if ($LASTEXITCODE -ne 0) { throw 'EXE signing failed' }
 
-      - name: Проверить Authenticode-подпись EXE
-        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' || env.HAS_WINDOWS_SIGNING_SECRETS == 'true' }}
+      - name: Verify signed application EXE
         shell: pwsh
         run: |
           $signature = Get-AuthenticodeSignature 'dist\GET-Passes.exe'
-          if ($signature.Status -ne 'Valid') {
-            throw "Invalid EXE Authenticode signature: $($signature.Status) $($signature.StatusMessage)"
-          }
+          if ($signature.Status -ne 'Valid') { throw "Invalid EXE signature: $($signature.Status)" }
 
-      - name: Собрать установщик Inno Setup
+      - name: Build Inno Setup installer
         shell: pwsh
         run: |
           $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
@@ -128,9 +135,8 @@ jobs:
           if (-not (Test-Path $isccPath)) { throw 'ISCC.exe not found' }
           & $isccPath 'installer\GET-Passes.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Inno Setup build failed' }
-          if (-not (Test-Path 'dist\installer\GET-Passes-Setup.exe')) { throw 'GET-Passes-Setup.exe not found' }
 
-      - name: Подписать установщик сертификатом из Azure Key Vault
+      - name: Sign installer with Azure certificate
         if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
         shell: pwsh
         env:
@@ -143,7 +149,7 @@ jobs:
           & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:AZURE_SIGN_CERT_PASSWORD" /v 'dist\installer\GET-Passes-Setup.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Installer signing failed' }
 
-      - name: Подписать установщик обычным Windows сертификатом
+      - name: Sign installer with PFX certificate
         if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
@@ -156,79 +162,52 @@ jobs:
           & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:WINDOWS_SIGN_CERT_PASSWORD" /v 'dist\installer\GET-Passes-Setup.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Installer signing failed' }
 
-      - name: Проверить Authenticode-подпись установщика
-        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' || env.HAS_WINDOWS_SIGNING_SECRETS == 'true' }}
+      - name: Verify signed installer
         shell: pwsh
         run: |
           $signature = Get-AuthenticodeSignature 'dist\installer\GET-Passes-Setup.exe'
-          if ($signature.Status -ne 'Valid') {
-            throw "Invalid installer Authenticode signature: $($signature.Status) $($signature.StatusMessage)"
-          }
+          if ($signature.Status -ne 'Valid') { throw "Invalid installer signature: $($signature.Status)" }
 
-      - name: Проверить установку и удаление Setup.exe
+      - name: Install, self-test and uninstall stable installer
         shell: pwsh
         run: |
           $setup = (Resolve-Path 'dist\installer\GET-Passes-Setup.exe').Path
-          $installDir = Join-Path $env:RUNNER_TEMP 'GET-Passes-installed'
+          $installDir = Join-Path $env:RUNNER_TEMP 'GET-Passes-stable'
           $install = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/DIR=$installDir") -PassThru -Wait
           if ($install.ExitCode -ne 0) { throw "Installer failed: $($install.ExitCode)" }
           $installedExe = Join-Path $installDir 'GET-Passes.exe'
-          if (-not (Test-Path $installedExe)) { throw 'Installed EXE not found' }
           $check = Start-Process -FilePath $installedExe -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
-          if (-not $check.WaitForExit(60000)) { $check.Kill(); throw 'Installed application self-test timed out' }
-          if ($check.ExitCode -ne 0) { throw 'Installed application self-test failed' }
+          if (-not $check.WaitForExit(60000)) { $check.Kill(); throw 'Installed self-test timed out' }
+          if ($check.ExitCode -ne 0) { throw 'Installed self-test failed' }
           $uninstaller = Join-Path $installDir 'unins000.exe'
-          if (-not (Test-Path $uninstaller)) { throw 'unins000.exe not found' }
           $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -PassThru -Wait
-          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller failed: $($uninstall.ExitCode)" }
-          if (Test-Path $installedExe) { throw 'Installed EXE remains after uninstall' }
+          if ($uninstall.ExitCode -ne 0) { throw 'Uninstall failed' }
 
-      - name: Зафиксировать статус подписи
-        shell: pwsh
-        run: |
-          if ('${{ env.HAS_AZURE_SIGNING_SECRETS }}' -eq 'true' -or '${{ env.HAS_WINDOWS_SIGNING_SECRETS }}' -eq 'true') {
-            $status = 'SIGNED'
-          } else {
-            $status = 'UNSIGNED'
-          }
-          Set-Content -Path 'dist\SIGNING-STATUS.txt' -Value $status -Encoding utf8
-          @"
-          Автоматическая сборка .exe и Setup.exe из ветки main.
-
-          Signing status: **$status**.
-          Portable: GET-Passes-windows.zip.
-          Installer: GET-Passes-Setup.exe.
-          Python на целевом компьютере не нужен.
-          "@ | Set-Content -Path 'release-notes.md' -Encoding utf8
-
-      - name: Собрать portable ZIP
+      - name: Build portable ZIP and checksums
         shell: pwsh
         run: |
           $out = 'dist\GET-Passes'
           New-Item -ItemType Directory -Path $out -Force | Out-Null
           Copy-Item 'dist\GET-Passes.exe' $out\
-          Copy-Item 'dist\SIGNING-STATUS.txt' $out\
           Copy-Item 'app_icon.ico' $out\
           if (Test-Path assets) { Copy-Item assets $out\assets -Recurse }
           if (Test-Path fonts) { Copy-Item fonts $out\fonts -Recurse }
           if (Test-Path fronts) { Copy-Item fronts $out\fronts -Recurse }
           7z a -tzip -mx=9 GET-Passes-windows.zip "$out\*"
+          $zipHash = (Get-FileHash 'GET-Passes-windows.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          $setupHash = (Get-FileHash 'dist\installer\GET-Passes-Setup.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          @(
+            "$zipHash  GET-Passes-windows.zip",
+            "$setupHash  GET-Passes-Setup.exe"
+          ) | Set-Content 'SHA256SUMS.txt' -Encoding ascii
 
-      - name: Приложить артефакты к запуску
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: GET-Passes-windows
-          path: |
-            GET-Passes-windows.zip
-            dist/installer/GET-Passes-Setup.exe
-          retention-days: 90
-
-      - name: Обновить релиз «Последняя сборка»
+      - name: Publish stable release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          tag_name: latest-build
-          name: Последняя сборка (${{ github.sha }})
-          body_path: release-notes.md
+          name: GET-Passes ${{ github.ref_name }}
+          prerelease: false
+          generate_release_notes: true
           files: |
             GET-Passes-windows.zip
             dist/installer/GET-Passes-Setup.exe
+            SHA256SUMS.txt

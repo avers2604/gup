@@ -29,6 +29,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
           python -m pip install pyinstaller==6.22.2
+          choco install innosetup -y --no-progress
 
       - name: Run tests on Windows
         run: python -m pytest
@@ -61,3 +62,48 @@ jobs:
             throw 'Smoke test timed out'
           }
           if ($check.ExitCode -ne 0) { throw 'Smoke test failed' }
+
+      - name: Build Inno Setup installer
+        shell: pwsh
+        run: |
+          $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if ($command) {
+            $isccPath = $command.Source
+          } else {
+            $isccPath = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          }
+          if (-not (Test-Path $isccPath)) { throw 'ISCC.exe not found' }
+          & $isccPath 'installer\GET-Passes.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup build failed' }
+          if (-not (Test-Path 'dist\installer\GET-Passes-Setup.exe')) {
+            throw 'GET-Passes-Setup.exe not found'
+          }
+
+      - name: Install, self-test and uninstall Setup.exe
+        shell: pwsh
+        run: |
+          $setup = (Resolve-Path 'dist\installer\GET-Passes-Setup.exe').Path
+          $installDir = Join-Path $env:RUNNER_TEMP 'GET-Passes-installed'
+          $installArgs = @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-',
+            "/DIR=$installDir"
+          )
+          $install = Start-Process -FilePath $setup -ArgumentList $installArgs -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "Installer failed: $($install.ExitCode)" }
+
+          $installedExe = Join-Path $installDir 'GET-Passes.exe'
+          if (-not (Test-Path $installedExe)) { throw 'Installed EXE not found' }
+          $check = Start-Process -FilePath $installedExe -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
+          if (-not $check.WaitForExit(60000)) {
+            $check.Kill()
+            throw 'Installed application self-test timed out'
+          }
+          if ($check.ExitCode -ne 0) { throw 'Installed application self-test failed' }
+
+          $uninstaller = Join-Path $installDir 'unins000.exe'
+          if (-not (Test-Path $uninstaller)) { throw 'unins000.exe not found' }
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          ) -PassThru -Wait
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller failed: $($uninstall.ExitCode)" }
+          if (Test-Path $installedExe) { throw 'Installed EXE remains after uninstall' }
