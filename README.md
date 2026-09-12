@@ -276,3 +276,43 @@ CI дополнительно запускает strict flake8/C901 для `getp
 `getpass_app`, `getpass_design`, `getpass_qt`, `tests` и `tools`, dependency
 audit и Bandit. Windows PR smoke проверяет обе точки входа, отдельный Qt preview
 EXE и прежний production installer.
+
+## Автоматическая сборка в GitHub Actions
+
+Файл [`.github/workflows/build-exe.yml`](.github/workflows/build-exe.yml) собирает релизный архив на Windows при каждом push в `main` и может быть запущен вручную через Actions.
+
+Что делается автоматически:
+
+- устанавливается Python 3.14.7;
+- ставятся зависимости из [requirements.txt](requirements.txt);
+- устанавливается `pyinstaller`;
+- собирается единый `.exe` через `pyinstaller --onefile --windowed`;
+- копируются `app_icon.ico`, `assets/` и шрифты (`fonts/` или `fronts/`);
+- создаётся zip-архив `GET-Passes-windows.zip`;
+- архив выкладывается как артефакт и обновляет релиз `latest-build`.
+
+Для локального релизного выпуска достаточно запускать ту же команду на Windows-машине и упаковать полученный `GET-Passes.exe` вместе с ресурсами.
+
+> `template.png` не требуется: бланки рисуются программой напрямую.
+
+## Доступность
+
+Основные поля доступны через Tab/Shift+Tab, обязательные поля отмечаются
+звёздочкой и текстовой ошибкой, а автодополнение управляется стрелками, Enter
+и Escape. Интерфейс сохраняет читаемые размеры при масштабе Windows 125–200%.
+
+## Статус миграции на PySide6
+
+Phase 4 переносит операторские workflow после выдачи документов: **«Журналы»**,
+**«Незавершённые»** и **«Массовая печать»**. Они работают поверх тех же
+SQLite-журналов, durable issuance и render/PDF механизмов, что и production
+Tkinter, но используют UI-независимый application layer, MVVM-lite, Qt
+model/view таблицы и `QThreadPool` для тяжёлой batch-генерации. Ранее
+перенесённые **«Пропуск ТС»** и **«Пропуск работника»** остаются полноценными
+PySide6 workflow без изменения печатного результата.
+
+Это всё ещё **не production cutover**: `pass_generator.py`, production
+PyInstaller/Inno и release pipeline остаются на Tkinter. Следующие независимые
+срезы Phase 4 должны перенести backup/restore, диагностику, управление blacklist
+и настройки. Физическая приёмка на рабочем месте и реальном принтере также
+остаётся обязательным отдельным этапом перед переключением production.
