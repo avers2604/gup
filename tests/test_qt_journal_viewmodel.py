@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from getpass_app.models.journal import (
     JournalField,
     JournalHistoryEvent,
@@ -69,8 +71,9 @@ class FakeJournalService:
         return (JournalHistoryEvent("now", "tester", "updated", ()),)
 
     def export(self, journal_key, rows, path):
-        self.exported.append((journal_key, tuple(rows), path))
-        return len(tuple(rows))
+        rows = tuple(rows)
+        self.exported.append((journal_key, rows, path))
+        return len(rows)
 
     def add_revoked_to_blacklist(self, journal_key, ids, reason):
         return len(tuple(ids))
@@ -137,3 +140,66 @@ def test_refresh_error_is_reported_without_replacing_last_snapshot(qtbot):
 
     assert vm.snapshot is previous
     assert messages == ["db unavailable"]
+
+
+def test_export_uses_entire_filtered_selection_not_only_current_page(qtbot):
+    service = FakeJournalService()
+    vm = JournalViewModel(service)
+    current = vm.snapshot
+    vm._snapshot = replace(
+        current,
+        total_records=3,
+        filtered_records=3,
+        page_count=3,
+    )
+    full_rows = tuple(
+        JournalRow(
+            id=f"p{index}",
+            values={
+                "id": f"p{index}",
+                "plate": f"TEST{index}",
+                "status": "действует",
+            },
+            state="active",
+        )
+        for index in range(1, 4)
+    )
+    original_snapshot = service.snapshot
+
+    def snapshot_for_export(
+        journal_key,
+        filters,
+        *,
+        sort_key=None,
+        sort_reverse=False,
+        page=0,
+        page_size=100,
+    ):
+        if page_size == 3:
+            service.snapshot_calls.append(
+                (journal_key, filters, sort_key, sort_reverse, page, page_size)
+            )
+            return replace(
+                current,
+                rows=full_rows,
+                total_records=3,
+                filtered_records=3,
+                page=0,
+                page_size=3,
+                page_count=1,
+            )
+        return original_snapshot(
+            journal_key,
+            filters,
+            sort_key=sort_key,
+            sort_reverse=sort_reverse,
+            page=page,
+            page_size=page_size,
+        )
+
+    service.snapshot = snapshot_for_export
+
+    assert vm.export("all.xlsx") is True
+
+    assert service.snapshot_calls[-1][4:] == (0, 3)
+    assert [row.id for row in service.exported[-1][1]] == ["p1", "p2", "p3"]
