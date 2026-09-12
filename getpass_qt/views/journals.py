@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -27,8 +26,14 @@ from PySide6.QtWidgets import (
 from getpass_qt.models.journal_table_model import JournalTableModel
 
 _EXTRA_FILTERS = {
-    "pass": (("zone", "Зона допуска", "combo"), ("driver", "Водитель", "text")),
-    "badge": (("park", "Подразделение", "combo"), ("role", "Должность", "combo")),
+    "pass": (
+        ("zone", "Зона допуска", "combo"),
+        ("driver", "Водитель", "text"),
+    ),
+    "badge": (
+        ("park", "Подразделение", "combo"),
+        ("role", "Должность", "combo"),
+    ),
 }
 _PROTECTED_FIELDS = frozenset({"id", "status", "revoked_at", "revoke_reason"})
 
@@ -48,7 +53,6 @@ class JournalsPage(QWidget):
         self._save_dialog = save_dialog or self._default_save_dialog
         self._ask_revoke_reason = ask_revoke_reason or self._default_revoke_reason
         self.extra_filters: dict[str, QWidget] = {}
-        self._extra_layout = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -140,36 +144,29 @@ class JournalsPage(QWidget):
         layout.addWidget(self.status_label)
         layout.addStretch(1)
 
-        self.previous_button = QPushButton("←")
-        self.previous_button.setObjectName("JournalPreviousPage")
+        self.previous_button = self._button("←", "JournalPreviousPage")
         self.previous_button.clicked.connect(partial(self._turn_page, -1))
         layout.addWidget(self.previous_button)
         self.page_label = QLabel()
         self.page_label.setObjectName("JournalPageLabel")
         layout.addWidget(self.page_label)
-        self.next_button = QPushButton("→")
-        self.next_button.setObjectName("JournalNextPage")
+        self.next_button = self._button("→", "JournalNextPage")
         self.next_button.clicked.connect(partial(self._turn_page, 1))
         layout.addWidget(self.next_button)
 
-        self.refresh_button = QPushButton("Обновить")
-        self.refresh_button.setObjectName("JournalRefreshButton")
+        self.refresh_button = self._button("Обновить", "JournalRefreshButton")
         self.refresh_button.clicked.connect(self._viewmodel.refresh)
         layout.addWidget(self.refresh_button)
-        self.history_button = QPushButton("История")
-        self.history_button.setObjectName("JournalHistoryButton")
+        self.history_button = self._button("История", "JournalHistoryButton")
         self.history_button.clicked.connect(self._show_history)
         layout.addWidget(self.history_button)
-        self.edit_button = QPushButton("Изменить")
-        self.edit_button.setObjectName("JournalEditButton")
+        self.edit_button = self._button("Изменить", "JournalEditButton")
         self.edit_button.clicked.connect(self._edit_selected)
         layout.addWidget(self.edit_button)
-        self.revoke_button = QPushButton("Аннулировать")
-        self.revoke_button.setObjectName("JournalRevokeButton")
+        self.revoke_button = self._button("Аннулировать", "JournalRevokeButton")
         self.revoke_button.clicked.connect(self._revoke_selected)
         layout.addWidget(self.revoke_button)
-        self.export_button = QPushButton("Экспорт текущего")
-        self.export_button.setObjectName("JournalExportButton")
+        self.export_button = self._button("Экспорт текущего", "JournalExportButton")
         self.export_button.setProperty("role", "primary")
         self.export_button.clicked.connect(self._export_current)
         layout.addWidget(self.export_button)
@@ -178,13 +175,13 @@ class JournalsPage(QWidget):
     def _connect_viewmodel(self) -> None:
         self._viewmodel.snapshot_changed.connect(self._sync_snapshot)
         self._viewmodel.busy_changed.connect(self._set_busy)
-        self._viewmodel.operation_failed.connect(self._show_error)
+        self._viewmodel.operation_failed.connect(self._show_status)
         self._viewmodel.operation_succeeded.connect(self._show_status)
 
     def _sync_snapshot(self, snapshot) -> None:
-        current = self.table.model()
-        if isinstance(current, JournalTableModel):
-            current.set_snapshot(snapshot)
+        model = self.table.model()
+        if isinstance(model, JournalTableModel):
+            model.set_snapshot(snapshot)
         else:
             self.table.setModel(JournalTableModel(snapshot, self.table))
             self.table.selectionModel().selectionChanged.connect(
@@ -216,37 +213,42 @@ class JournalsPage(QWidget):
             self.status_combo.blockSignals(old)
 
     def _rebuild_extra_filters(self, journal_key: str) -> None:
+        self._clear_extra_filters()
+        values = self._viewmodel.filters.extra_values()
+        for key, label, kind in _EXTRA_FILTERS[journal_key]:
+            widget = self._make_extra_filter(key, label, kind, values.get(key, ""))
+            self.extra_filters[key] = widget
+            self._extra_layout.addWidget(widget)
+        self._extra_layout.addStretch(1)
+
+    def _clear_extra_filters(self) -> None:
         while self._extra_layout.count():
             item = self._extra_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
         self.extra_filters.clear()
-        values = self._viewmodel.filters.extra_values()
-        for key, label, kind in _EXTRA_FILTERS[journal_key]:
-            if kind == "combo":
-                widget = QComboBox()
-                widget.addItem(label, "")
-                for value in self._viewmodel.distinct(key):
-                    widget.addItem(value, value)
-                current = values.get(key, "")
-                index = widget.findData(current)
-                if index >= 0:
-                    widget.setCurrentIndex(index)
-                widget.currentIndexChanged.connect(
-                    partial(self._extra_combo_changed, key, widget)
-                )
-            else:
-                widget = QLineEdit()
-                widget.setPlaceholderText(label)
-                widget.setText(values.get(key, ""))
-                widget.editingFinished.connect(
-                    partial(self._extra_text_changed, key, widget)
-                )
-            widget.setObjectName(f"JournalFilter{key.title()}")
-            self.extra_filters[key] = widget
-            self._extra_layout.addWidget(widget)
-        self._extra_layout.addStretch(1)
+
+    def _make_extra_filter(self, key: str, label: str, kind: str, current: str):
+        if kind == "combo":
+            widget = QComboBox()
+            widget.addItem(label, "")
+            for value in self._viewmodel.distinct(key):
+                widget.addItem(value, value)
+            index = widget.findData(current)
+            if index >= 0:
+                widget.setCurrentIndex(index)
+            widget.currentIndexChanged.connect(
+                partial(self._extra_combo_changed, key, widget)
+            )
+        else:
+            widget = QLineEdit(current)
+            widget.setPlaceholderText(label)
+            widget.editingFinished.connect(
+                partial(self._extra_text_changed, key, widget)
+            )
+        widget.setObjectName(f"JournalFilter{key.title()}")
+        return widget
 
     def _resize_columns(self, snapshot) -> None:
         header = self.table.horizontalHeader()
@@ -285,8 +287,7 @@ class JournalsPage(QWidget):
         self._viewmodel.set_extra_filter(key, widget.text())
 
     def _sort_column(self, column: int) -> None:
-        snapshot = self._viewmodel.snapshot
-        fields = snapshot.visible_fields
+        fields = self._viewmodel.snapshot.visible_fields
         if 0 <= column < len(fields):
             self._viewmodel.sort_by(fields[column].key)
 
@@ -295,10 +296,9 @@ class JournalsPage(QWidget):
 
     def _selection_changed(self, *_args) -> None:
         selected = self._selected_ids()
-        has_selection = bool(selected)
         self.edit_button.setEnabled(len(selected) == 1)
         self.history_button.setEnabled(len(selected) == 1)
-        self.revoke_button.setEnabled(has_selection)
+        self.revoke_button.setEnabled(bool(selected))
 
     def _selected_ids(self) -> tuple[str, ...]:
         selection = self.table.selectionModel()
@@ -329,10 +329,7 @@ class JournalsPage(QWidget):
         selected = self._selected_ids()
         if len(selected) != 1:
             return
-        JournalHistoryDialog(
-            self._viewmodel.history(selected[0]),
-            self,
-        ).exec()
+        JournalHistoryDialog(self._viewmodel.history(selected[0]), self).exec()
 
     def _revoke_selected(self) -> None:
         selected = self._selected_ids()
@@ -344,6 +341,10 @@ class JournalsPage(QWidget):
         reason = reason.strip() or "не указана"
         if not self._viewmodel.revoke(selected, reason):
             return
+        if self._confirm_blacklist():
+            self._viewmodel.add_revoked_to_blacklist(selected, reason)
+
+    def _confirm_blacklist(self) -> bool:
         answer = QMessageBox.question(
             self,
             "Чёрный список",
@@ -351,8 +352,7 @@ class JournalsPage(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
-        if answer == QMessageBox.StandardButton.Yes:
-            self._viewmodel.add_revoked_to_blacklist(selected, reason)
+        return answer == QMessageBox.StandardButton.Yes
 
     def _export_current(self) -> None:
         path = self._save_dialog()
@@ -395,8 +395,11 @@ class JournalsPage(QWidget):
     def _show_status(self, message: str) -> None:
         self.status_label.setText(message)
 
-    def _show_error(self, message: str) -> None:
-        self.status_label.setText(message)
+    @staticmethod
+    def _button(text: str, object_name: str) -> QPushButton:
+        button = QPushButton(text)
+        button.setObjectName(object_name)
+        return button
 
     @staticmethod
     def _set_line_text(widget: QLineEdit, value: str) -> None:
@@ -412,7 +415,6 @@ class EditJournalRecordDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Редактирование записи")
         self._entries: dict[str, QLineEdit] = {}
-
         root = QVBoxLayout(self)
         form = QFormLayout()
         for field in fields:
@@ -423,7 +425,6 @@ class EditJournalRecordDialog(QDialog):
             self._entries[field.key] = edit
             form.addRow(field.title, edit)
         root.addLayout(form)
-
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save
             | QDialogButtonBox.StandardButton.Cancel
@@ -444,18 +445,16 @@ class JournalHistoryDialog(QDialog):
         layout = QVBoxLayout(self)
         text = QTextEdit()
         text.setReadOnly(True)
-        if not events:
-            text.setPlainText("Запись создана до включения истории изменений.")
-        else:
-            text.setPlainText(self._format_events(events))
+        text.setPlainText(self._history_text(events))
         layout.addWidget(text)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
-        buttons.clicked.connect(self.accept)
         layout.addWidget(buttons)
 
     @staticmethod
-    def _format_events(events) -> str:
+    def _history_text(events) -> str:
+        if not events:
+            return "Запись создана до включения истории изменений."
         blocks = []
         for event in events:
             lines = [f"{event.occurred_at} · {event.actor} · {event.action}"]
