@@ -61,6 +61,8 @@ class _SelfTestWindow:
         theme_manager,
         vehicle_viewmodel,
         employee_badge_viewmodel,
+        journal_viewmodel,
+        operations_viewmodel,
     ):
         self.active_route = "dashboard"
         self.stack = _SelfTestStack()
@@ -82,7 +84,7 @@ def test_qt_self_test_returns_zero(monkeypatch):
     assert main(["--self-test"]) == 0
 
 
-def test_qt_self_test_exercises_vehicle_and_employee_previews(monkeypatch):
+def test_qt_self_test_exercises_real_phase4_routes(monkeypatch):
     events = []
     _SelfTestWindow.events = events
 
@@ -111,10 +113,12 @@ def test_qt_self_test_exercises_vehicle_and_employee_previews(monkeypatch):
         ("preview", None),
         ("surname", "ИВАНОВ"),
         ("wait", 250),
+        ("route", "journals"),
+        ("route", "operations"),
     ]
 
 
-def test_phase1_keeps_tkinter_as_default_production_entrypoint():
+def test_phase4_keeps_tkinter_as_default_production_entrypoint():
     source = (
         Path(__file__).resolve().parents[1] / "pass_generator.py"
     ).read_text(encoding="utf-8")
