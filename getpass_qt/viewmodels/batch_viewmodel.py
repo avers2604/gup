@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QThreadPool, Signal
 
+from getpass_app.services.batch_service import BatchCancelled
 from getpass_qt.workers.task_worker import TaskWorker
 
 
@@ -154,6 +155,9 @@ class BatchViewModel(QObject):
         self.busy_changed.emit(busy)
 
     def _on_worker_error(self, exc) -> None:
+        if isinstance(exc, BatchCancelled):
+            self.operation_failed.emit("Массовая печать отменена.")
+            return
         self.operation_failed.emit(str(exc))
 
     def _on_worker_finished(self) -> None:
