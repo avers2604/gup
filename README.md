@@ -21,7 +21,7 @@ python pass_generator.py
 
 ## PySide6 preview (GET-Passes 2.0 migration)
 
-На Phase 3 production entry point по-прежнему остаётся текущим Tkinter-приложением:
+На Phase 4 production entry point по-прежнему остаётся текущим Tkinter-приложением:
 
 ```bash
 python pass_generator.py
@@ -40,24 +40,42 @@ Headless/self-test нового интерфейса:
 python -m getpass_qt --self-test
 ```
 
-В Phase 3 маршруты **«Пропуск ТС»** и **«Пропуск работника»** уже являются
-реальными вертикальными workflow. Маршрут ТС поддерживает две формы пропуска
-на А4 или один пропуск на А5, автоподстановку только данных автомобиля,
-live preview через существующий renderer, сохранение PDF, одностороннюю/
-двустороннюю печать и durable issuance с записью в действующий SQLite-журнал
-после успешного внешнего вывода. Старые ФИО водителя, телефон и зона допуска
-по госномеру не восстанавливаются.
+В Phase 4 маршруты **«Пропуск ТС»**, **«Пропуск работника»**, **«Массовая печать»**,
+**«Журналы»** и **«Незавершённые»** уже являются реальными PySide6 workflow.
+Маршрут ТС поддерживает две формы пропуска на А4 или один пропуск на А5,
+автоподстановку только данных автомобиля, live preview через существующий renderer,
+сохранение PDF, одностороннюю/двустороннюю печать и durable issuance с записью
+в действующий SQLite-журнал после успешного внешнего вывода. Старые ФИО водителя,
+телефон и зона допуска по госномеру не восстанавливаются.
 
 Маршрут работника использует существующий без изменений renderer бейджа,
 кадрирование фото 3:4 через общую core-геометрию, live preview, предупреждения
 о дубликатах и blacklist, три прежних формата (`card`, `a4_grid`, `a4_single`),
 PDF/печать и тот же durable issuance `prepare → output → confirm`.
 
-Остальные маршруты PySide6 пока остаются миграционными экранами и продолжают
-полноценно работать в production Tkinter-приложении. Phase 3 не меняет SQLite
-schema, внешний вид печатных форм, production entry point, release pipeline или
-production installer. В Windows CI отдельно собирается `GET-Passes-Qt-Preview.exe`;
-он не подписывается и не публикуется как production release.
+PySide6-журналы используют `QAbstractTableModel`/`QTableView` и сохраняют
+существующую семантику журналов ТС и работников: поиск, статус, диапазон дат,
+контекстные фильтры, сортировку, пагинацию, редактирование с optimistic check,
+историю, аннулирование, предложение добавить запись в blacklist и экспорт
+текущей страницы в XLSX. Экран незавершённых выдач объединяет prepared-операции
+обоих журналов, различает готовый/отсутствующий файл и прямую печать, позволяет
+безопасно открыть существующий документ, подтвердить фактическую выдачу или
+отменить операцию.
+
+Маршрут массовой печати принимает прежние CSV-шаблоны ТС и бейджей (`;`,
+UTF-8-SIG/CP1251), показывает проверку импорта через `QTableView`, требует
+подтверждения предупреждений и формирует PDF существующими render-функциями:
+два пропуска ТС на А4 или сетку 3×3 бейджей. Генерация выполняется через
+`QThreadPool`/`QRunnable` с прогрессом и отменой; выдача сохраняет durable
+семантику `prepare → PDF → confirm`, а незавершённая операция остаётся доступна
+для recovery, если PDF уже записан, но журнал не удалось подтвердить.
+
+Маршруты **«Резервные копии»**, **«Диагностика»** и **«Настройки»** пока остаются
+следующими шагами миграции и полноценно работают в production Tkinter-приложении.
+Phase 4 не меняет SQLite schema, внешний вид печатных форм, production entry point,
+release pipeline или production installer. В Windows CI отдельно собирается
+`GET-Passes-Qt-Preview.exe`; он не подписывается и не публикуется как production
+release.
 
 ## Сборка в один EXE
 
@@ -221,7 +239,7 @@ getpass_core/         предметная логика, без Tkinter/PySide6
   printing.py           печать через Windows (в т.ч. двусторонняя), сохранение документов
   backup.py             резервное копирование и восстановление
 getpass_design/       presentation-neutral GET design tokens
-getpass_app/          UI-независимый application boundary для ТС и бейджей
+getpass_app/          UI-независимый application boundary для Qt workflow
 getpass_ui/           production-интерфейс Tkinter
   tokens.py             compatibility re-export GET-токенов
   theme.py              движок оформления: стили ttk, Card, светлая/тёмная тема
@@ -233,7 +251,7 @@ getpass_ui/           production-интерфейс Tkinter
   crop_window.py        кадрирование фотографии, овальная направляющая
   batch.py              массовая печать
   widgets.py            общие элементы (прокрутка, диалог прогресса)
-getpass_qt/           PySide6 Phase-3 preview: реальные ТС + бейдж, MVVM-lite shell
+getpass_qt/           PySide6 Phase-4 preview: ТС + бейдж + batch + журналы + recovery
 tests/                автотесты
 ```
 
@@ -250,7 +268,7 @@ tests/                автотесты
 pip install -r requirements-dev.txt
 python -m pytest                    # логика, хранилище, renderer, Tkinter и PySide6 preview
 xvfb-run -a python -m pytest        # + headless-проверка интерфейсов (Linux/CI)
-python -m getpass_qt --self-test    # smoke: shell + ТС + бейдж + debounced renderer preview
+python -m getpass_qt --self-test    # smoke: shell + ТС + бейдж + batch + журналы + recovery
 python pass_generator.py --self-test
 ```
 
@@ -285,17 +303,16 @@ EXE и прежний production installer.
 
 ## Статус миграции на PySide6
 
-Phase 3 переносит второй production-grade вертикальный workflow GET-Passes 2.0 —
-**«Пропуск работника»** — поверх уже перенесённого **«Пропуска ТС»**. Оба
-PySide6 workflow используют UI-независимые модели/сервисы, MVVM-lite ViewModel,
-Variant-A рабочие экраны, существующие renderer-функции, действующие SQLite-
-журналы и прежние механизмы PDF/печати. Для бейджа сохранены три действующих
-формата и общая core-геометрия кадрирования фотографии 3:4. Durable issuance
-сохраняет порядок `prepare → output → confirm`; при ошибке до подтверждения
-prepared-операция отменяется.
+Phase 4 переносит операторские workflow после выдачи документов: **«Журналы»**,
+**«Незавершённые»** и **«Массовая печать»**. Они работают поверх тех же
+SQLite-журналов, durable issuance и render/PDF механизмов, что и production
+Tkinter, но используют UI-независимый application layer, MVVM-lite, Qt
+model/view таблицы и `QThreadPool` для тяжёлой batch-генерации. Ранее
+перенесённые **«Пропуск ТС»** и **«Пропуск работника»** остаются полноценными
+PySide6 workflow без изменения печатного результата.
 
 Это всё ещё **не production cutover**: `pass_generator.py`, production
-PyInstaller/Inno и release pipeline остаются на Tkinter. Следующие фазы должны
-отдельно перенести журналы/реестры, массовую печать и остальные операторские
-сценарии. Физическая приёмка на рабочем месте и реальном принтере также остаётся
-обязательным отдельным этапом перед переключением production.
+PyInstaller/Inno и release pipeline остаются на Tkinter. Следующие независимые
+срезы Phase 4 должны перенести backup/restore, диагностику, управление blacklist
+и настройки. Физическая приёмка на рабочем месте и реальном принтере также
+остаётся обязательным отдельным этапом перед переключением production.

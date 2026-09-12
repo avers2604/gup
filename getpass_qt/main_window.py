@@ -9,15 +9,29 @@ from PySide6.QtWidgets import (
 )
 
 from getpass_qt.theme.manager import ThemeManager
+from getpass_qt.viewmodels.batch_viewmodel import BatchViewModel
 from getpass_qt.viewmodels.employee_badge_viewmodel import EmployeeBadgeViewModel
+from getpass_qt.viewmodels.journal_viewmodel import JournalViewModel
 from getpass_qt.viewmodels.main_viewmodel import ROUTES, MainViewModel
+from getpass_qt.viewmodels.operations_viewmodel import OperationsViewModel
 from getpass_qt.viewmodels.vehicle_pass_viewmodel import VehiclePassViewModel
+from getpass_qt.views.batch import BatchPage
 from getpass_qt.views.dashboard import DashboardPage
 from getpass_qt.views.employee_badge import EmployeeBadgePage
+from getpass_qt.views.journals import JournalsPage
 from getpass_qt.views.migration_page import MigrationPage
+from getpass_qt.views.operations import OperationsPage
 from getpass_qt.views.vehicle_pass import VehiclePassPage
 from getpass_qt.widgets.sidebar import ROUTE_LABELS, Sidebar
 
+_REAL_ROUTES = frozenset({
+    "dashboard",
+    "vehicle",
+    "employee",
+    "batch",
+    "journals",
+    "operations",
+})
 _MIGRATION_DESCRIPTIONS = {
     route: (
         "Этот рабочий сценарий переносится на PySide6. "
@@ -25,7 +39,7 @@ _MIGRATION_DESCRIPTIONS = {
         "доступна в текущем Tkinter-приложении GET-Passes."
     )
     for route in ROUTES
-    if route not in ("dashboard", "vehicle", "employee")
+    if route not in _REAL_ROUTES
 }
 
 
@@ -35,6 +49,9 @@ class MainWindow(QMainWindow):
         theme_manager: ThemeManager,
         vehicle_viewmodel: VehiclePassViewModel,
         employee_badge_viewmodel: EmployeeBadgeViewModel,
+        batch_viewmodel: BatchViewModel,
+        journal_viewmodel: JournalViewModel,
+        operations_viewmodel: OperationsViewModel,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -85,8 +102,17 @@ class MainWindow(QMainWindow):
         self.employee_page = EmployeeBadgePage(employee_badge_viewmodel)
         self._add_page("employee", self.employee_page)
 
+        self.batch_page = BatchPage(batch_viewmodel)
+        self._add_page("batch", self.batch_page)
+
+        self.journals_page = JournalsPage(journal_viewmodel)
+        self._add_page("journals", self.journals_page)
+
+        self.operations_page = OperationsPage(operations_viewmodel)
+        self._add_page("operations", self.operations_page)
+
         for route in ROUTES[1:]:
-            if route in ("vehicle", "employee"):
+            if route in _REAL_ROUTES:
                 continue
             page = MigrationPage(
                 ROUTE_LABELS[route],
@@ -102,7 +128,7 @@ class MainWindow(QMainWindow):
             lambda: self._viewmodel.set_route("employee")
         )
         self.dashboard.batch_requested.connect(
-            lambda: self._viewmodel.set_route("vehicle")
+            lambda: self._viewmodel.set_route("batch")
         )
         self._viewmodel.route_changed.connect(self._show_route)
         self._theme_manager.theme_changed.connect(self._update_theme_button)
