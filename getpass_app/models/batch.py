@@ -55,3 +55,11 @@ class BatchReview:
     @property
     def can_generate(self) -> bool:
         return bool(self.rows) and self.error_count == 0
+
+
+@dataclass(frozen=True)
+class BatchOutputResult:
+    kind: BatchKind
+    path: str
+    item_count: int
+    page_count: int
