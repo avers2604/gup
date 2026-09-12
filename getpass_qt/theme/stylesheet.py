@@ -61,7 +61,7 @@ QLineEdit, QComboBox {{
 QLineEdit:focus, QComboBox:focus {{
     border: 2px solid {p.focus};
 }}
-QLineEdit[invalid=\"true\"] {{
+QLineEdit[invalid=\"true\"], QComboBox[invalid=\"true\"] {{
     border: 2px solid {p.danger};
 }}
 QComboBox QAbstractItemView {{
@@ -94,26 +94,51 @@ QTabWidget#PassSlotTabs QTabBar::tab:disabled {{
     color: {p.ink_faint};
     background: {p.ground};
 }}
-QFrame#PrintSettings {{
+QFrame#PrintSettings, QFrame#BadgePrintSettings {{
     background: {p.surface_alt};
     border: 1px solid {p.line};
     border-radius: 14px;
 }}
-QWidget#VehiclePreview {{
+QFrame#BadgePhotoCard {{
+    background: {p.surface};
+    border: 1px solid {p.line};
+    border-radius: 18px;
+}}
+QPushButton#BadgePhotoButton {{
+    background: {p.surface_alt};
+    color: {p.ink};
+    border: 1px solid {p.line_strong};
+    border-radius: 10px;
+    padding: 8px 10px;
+}}
+QPushButton#BadgePhotoButton:hover {{ border-color: {p.focus}; }}
+QPushButton#BadgePhotoButton[invalid=\"true\"] {{
+    border: 2px solid {p.danger};
+}}
+QWidget#VehiclePreview, QWidget#BadgePreview {{
     background: {p.surface_alt};
     border: 1px solid {p.line};
     border-radius: 14px;
 }}
-QPushButton#PrintButton {{
+QWidget#PhotoCropCanvas {{
+    background: {p.surface_alt};
+    border: 1px solid {p.line_strong};
+    border-radius: 12px;
+}}
+QPushButton#PrintButton, QPushButton#BadgePrintButton {{
     min-height: 22px;
     background: {p.accent_fill};
     color: {p.on_accent};
 }}
-QPushButton#PrintButton:hover {{ background: {p.accent_fill_hover}; }}
-QPushButton#SavePdfButton {{
+QPushButton#PrintButton:hover, QPushButton#BadgePrintButton:hover {{
+    background: {p.accent_fill_hover};
+}}
+QPushButton#SavePdfButton, QPushButton#BadgeSavePdfButton {{
     min-height: 22px;
     background: {p.primary};
     color: {p.on_primary};
 }}
-QPushButton#SavePdfButton:hover {{ background: {p.primary_hover}; }}
+QPushButton#SavePdfButton:hover, QPushButton#BadgeSavePdfButton:hover {{
+    background: {p.primary_hover};
+}}
 """

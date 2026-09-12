@@ -9,9 +9,11 @@ from PySide6.QtWidgets import (
 )
 
 from getpass_qt.theme.manager import ThemeManager
+from getpass_qt.viewmodels.employee_badge_viewmodel import EmployeeBadgeViewModel
 from getpass_qt.viewmodels.main_viewmodel import ROUTES, MainViewModel
 from getpass_qt.viewmodels.vehicle_pass_viewmodel import VehiclePassViewModel
 from getpass_qt.views.dashboard import DashboardPage
+from getpass_qt.views.employee_badge import EmployeeBadgePage
 from getpass_qt.views.migration_page import MigrationPage
 from getpass_qt.views.vehicle_pass import VehiclePassPage
 from getpass_qt.widgets.sidebar import ROUTE_LABELS, Sidebar
@@ -23,7 +25,7 @@ _MIGRATION_DESCRIPTIONS = {
         "доступна в текущем Tkinter-приложении GET-Passes."
     )
     for route in ROUTES
-    if route not in ("dashboard", "vehicle")
+    if route not in ("dashboard", "vehicle", "employee")
 }
 
 
@@ -32,6 +34,7 @@ class MainWindow(QMainWindow):
         self,
         theme_manager: ThemeManager,
         vehicle_viewmodel: VehiclePassViewModel,
+        employee_badge_viewmodel: EmployeeBadgeViewModel,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -79,8 +82,11 @@ class MainWindow(QMainWindow):
         self.vehicle_page = VehiclePassPage(vehicle_viewmodel)
         self._add_page("vehicle", self.vehicle_page)
 
+        self.employee_page = EmployeeBadgePage(employee_badge_viewmodel)
+        self._add_page("employee", self.employee_page)
+
         for route in ROUTES[1:]:
-            if route == "vehicle":
+            if route in ("vehicle", "employee"):
                 continue
             page = MigrationPage(
                 ROUTE_LABELS[route],
