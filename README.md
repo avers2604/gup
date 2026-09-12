@@ -40,13 +40,13 @@ Headless/self-test нового интерфейса:
 python -m getpass_qt --self-test
 ```
 
-В Phase 4 маршруты **«Пропуск ТС»**, **«Пропуск работника»**, **«Журналы»**
-и **«Незавершённые»** уже являются реальными PySide6 workflow. Маршрут ТС
-поддерживает две формы пропуска на А4 или один пропуск на А5, автоподстановку
-только данных автомобиля, live preview через существующий renderer, сохранение
-PDF, одностороннюю/двустороннюю печать и durable issuance с записью в действующий
-SQLite-журнал после успешного внешнего вывода. Старые ФИО водителя, телефон и
-зона допуска по госномеру не восстанавливаются.
+В Phase 4 маршруты **«Пропуск ТС»**, **«Пропуск работника»**, **«Массовая печать»**,
+**«Журналы»** и **«Незавершённые»** уже являются реальными PySide6 workflow.
+Маршрут ТС поддерживает две формы пропуска на А4 или один пропуск на А5,
+автоподстановку только данных автомобиля, live preview через существующий renderer,
+сохранение PDF, одностороннюю/двустороннюю печать и durable issuance с записью
+в действующий SQLite-журнал после успешного внешнего вывода. Старые ФИО водителя,
+телефон и зона допуска по госномеру не восстанавливаются.
 
 Маршрут работника использует существующий без изменений renderer бейджа,
 кадрирование фото 3:4 через общую core-геометрию, live preview, предупреждения
@@ -62,12 +62,20 @@ PySide6-журналы используют `QAbstractTableModel`/`QTableView` �
 безопасно открыть существующий документ, подтвердить фактическую выдачу или
 отменить операцию.
 
-Маршруты **«Резервные копии»**, **«Диагностика»** и **«Настройки»**, а также
-массовая печать пока остаются следующими шагами миграции и полноценно работают
-в production Tkinter-приложении. Phase 4 не меняет SQLite schema, внешний вид
-печатных форм, production entry point, release pipeline или production installer.
-В Windows CI отдельно собирается `GET-Passes-Qt-Preview.exe`; он не подписывается
-и не публикуется как production release.
+Маршрут массовой печати принимает прежние CSV-шаблоны ТС и бейджей (`;`,
+UTF-8-SIG/CP1251), показывает проверку импорта через `QTableView`, требует
+подтверждения предупреждений и формирует PDF существующими render-функциями:
+два пропуска ТС на А4 или сетку 3×3 бейджей. Генерация выполняется через
+`QThreadPool`/`QRunnable` с прогрессом и отменой; выдача сохраняет durable
+семантику `prepare → PDF → confirm`, а незавершённая операция остаётся доступна
+для recovery, если PDF уже записан, но журнал не удалось подтвердить.
+
+Маршруты **«Резервные копии»**, **«Диагностика»** и **«Настройки»** пока остаются
+следующими шагами миграции и полноценно работают в production Tkinter-приложении.
+Phase 4 не меняет SQLite schema, внешний вид печатных форм, production entry point,
+release pipeline или production installer. В Windows CI отдельно собирается
+`GET-Passes-Qt-Preview.exe`; он не подписывается и не публикуется как production
+release.
 
 ## Сборка в один EXE
 
@@ -243,7 +251,7 @@ getpass_ui/           production-интерфейс Tkinter
   crop_window.py        кадрирование фотографии, овальная направляющая
   batch.py              массовая печать
   widgets.py            общие элементы (прокрутка, диалог прогресса)
-getpass_qt/           PySide6 Phase-4 preview: ТС + бейдж + журналы + recovery
+getpass_qt/           PySide6 Phase-4 preview: ТС + бейдж + batch + журналы + recovery
 tests/                автотесты
 ```
 
@@ -260,7 +268,7 @@ tests/                автотесты
 pip install -r requirements-dev.txt
 python -m pytest                    # логика, хранилище, renderer, Tkinter и PySide6 preview
 xvfb-run -a python -m pytest        # + headless-проверка интерфейсов (Linux/CI)
-python -m getpass_qt --self-test    # smoke: shell + ТС + бейдж + журналы + recovery
+python -m getpass_qt --self-test    # smoke: shell + ТС + бейдж + batch + журналы + recovery
 python pass_generator.py --self-test
 ```
 
@@ -268,44 +276,3 @@ CI дополнительно запускает strict flake8/C901 для `getp
 `getpass_app`, `getpass_design`, `getpass_qt`, `tests` и `tools`, dependency
 audit и Bandit. Windows PR smoke проверяет обе точки входа, отдельный Qt preview
 EXE и прежний production installer.
-
-## Автоматическая сборка в GitHub Actions
-
-Файл [`.github/workflows/build-exe.yml`](.github/workflows/build-exe.yml) собирает релизный архив на Windows при каждом push в `main` и может быть запущен вручную через Actions.
-
-Что делается автоматически:
-
-- устанавливается Python 3.14.7;
-- ставятся зависимости из [requirements.txt](requirements.txt);
-- устанавливается `pyinstaller`;
-- собирается единый `.exe` через `pyinstaller --onefile --windowed`;
-- копируются `app_icon.ico`, `assets/` и шрифты (`fonts/` или `fronts/`);
-- создаётся zip-архив `GET-Passes-windows.zip`;
-- архив выкладывается как артефакт и обновляет релиз `latest-build`.
-
-Для локального релизного выпуска достаточно запускать ту же команду на Windows-машине и упаковать полученный `GET-Passes.exe` вместе с ресурсами.
-
-> `template.png` не требуется: бланки рисуются программой напрямую.
-
-## Доступность
-
-Основные поля доступны через Tab/Shift+Tab, обязательные поля отмечаются
-звёздочкой и текстовой ошибкой, а автодополнение управляется стрелками, Enter
-и Escape. Интерфейс сохраняет читаемые размеры при масштабе Windows 125–200%.
-
-## Статус миграции на PySide6
-
-Phase 4 переносит первый набор операторских workflow после выдачи документов:
-**«Журналы»** и **«Незавершённые»**. Они работают поверх тех же SQLite-журналов
-и durable issuance, что и production Tkinter, но используют UI-независимый
-application layer, MVVM-lite и Qt model/view таблицы. Ранее перенесённые
-**«Пропуск ТС»** и **«Пропуск работника»** остаются полноценными PySide6
-workflow и используют существующие renderer/PDF/print механизмы без изменения
-печатного результата.
-
-Это всё ещё **не production cutover**: `pass_generator.py`, production
-PyInstaller/Inno и release pipeline остаются на Tkinter. Следующие независимые
-срезы Phase 4 должны перенести массовую печать, backup/restore, диагностику,
-управление blacklist и настройки. Физическая приёмка на рабочем месте и реальном
-принтере также остаётся обязательным отдельным этапом перед переключением
-production.
