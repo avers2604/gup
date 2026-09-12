@@ -241,6 +241,17 @@ class BatchService:
         operation_id = self._prepare(journal, records, path)
         total = self._page_count(kind, len(items))
         pages = self._pages(kind, items, total, cancelled, progress)
+        self._save_prepared_pdf(journal, operation_id, pages, path)
+        self._confirm_prepared(journal, operation_id)
+        self._update_vehicle_cache(kind, items)
+        return BatchOutputResult(
+            kind=kind,
+            path=path,
+            item_count=len(items),
+            page_count=total,
+        )
+
+    def _save_prepared_pdf(self, journal, operation_id, pages, path) -> None:
         try:
             self._save_pdf_pages(pages, path)
         except BatchCancelled:
@@ -250,22 +261,19 @@ class BatchService:
             self._try_cancel(journal, operation_id)
             raise BatchOutputError(str(exc)) from exc
 
+    def _confirm_prepared(self, journal, operation_id) -> None:
         try:
             self._confirm(journal, operation_id)
         except Exception as exc:
             raise BatchOutputError(str(exc)) from exc
 
-        if kind == "pass":
-            try:
-                self._update_cache(items)
-            except Exception as exc:
-                raise BatchOutputError(str(exc)) from exc
-        return BatchOutputResult(
-            kind=kind,
-            path=path,
-            item_count=len(items),
-            page_count=total,
-        )
+    def _update_vehicle_cache(self, kind, items) -> None:
+        if kind != "pass":
+            return
+        try:
+            self._update_cache(items)
+        except Exception as exc:
+            raise BatchOutputError(str(exc)) from exc
 
     def _pages(self, kind, items, total, cancelled, progress):
         builder = self._pass_page if kind == "pass" else self._badge_page
