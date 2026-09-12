@@ -1,16 +1,27 @@
 from __future__ import annotations
 
 import csv
+import threading
 from pathlib import Path
+
+from PIL import ImageDraw
 
 from getpass_app.models.batch import (
     BatchKind,
+    BatchOutputResult,
     BatchReview,
     BatchReviewRow,
     BatchTemplate,
 )
+from getpass_core import issuance
+from getpass_core import render as R
 from getpass_core.importing import photo_in_folder, validate_items
-from getpass_core.storage import BADGE_JOURNAL, PASS_JOURNAL
+from getpass_core.printing import save_pdf_pages
+from getpass_core.storage import (
+    BADGE_JOURNAL,
+    PASS_JOURNAL,
+    update_cars_cache,
+)
 
 _PASS_TEMPLATE = BatchTemplate(
     kind="pass",
@@ -73,6 +84,19 @@ _BADGE_TEMPLATE = BatchTemplate(
 _TEMPLATES = {"pass": _PASS_TEMPLATE, "badge": _BADGE_TEMPLATE}
 
 
+class BatchCancelled(Exception):
+    pass
+
+
+class BatchOutputError(RuntimeError):
+    pass
+
+
+def _decorate_pass_sheet(image) -> None:
+    draw = ImageDraw.Draw(image)
+    R.draw_sheet_brand_icons(draw, 140, 52, size=44)
+
+
 class BatchService:
     def __init__(
         self,
@@ -81,10 +105,30 @@ class BatchService:
         badge_journal=BADGE_JOURNAL,
         validate=validate_items,
         photo_lookup=photo_in_folder,
+        render_pass=R.render_pass,
+        build_pass_sheet=R.build_pass_a4_sheet,
+        decorate_pass_sheet=_decorate_pass_sheet,
+        render_badge=R.render_single_badge_image,
+        build_badge_grid=R.build_badge_a4_grid,
+        save_pdf_pages=save_pdf_pages,
+        prepare=issuance.prepare,
+        confirm=issuance.confirm,
+        cancel=issuance.cancel,
+        update_cache=update_cars_cache,
     ) -> None:
         self._journals = {"pass": pass_journal, "badge": badge_journal}
         self._validate = validate
         self._photo_lookup = photo_lookup
+        self._render_pass = render_pass
+        self._build_pass_sheet = build_pass_sheet
+        self._decorate_pass_sheet = decorate_pass_sheet
+        self._render_badge = render_badge
+        self._build_badge_grid = build_badge_grid
+        self._save_pdf_pages = save_pdf_pages
+        self._prepare = prepare
+        self._confirm = confirm
+        self._cancel = cancel
+        self._update_cache = update_cache
 
     @staticmethod
     def template(kind: BatchKind) -> BatchTemplate:
@@ -175,6 +219,110 @@ class BatchService:
             writer = csv.writer(stream, delimiter=";")
             writer.writerow(template.header)
             writer.writerow(template.sample)
+
+    def generate_pdf(
+        self,
+        kind: BatchKind,
+        items,
+        path: str,
+        *,
+        cancelled=None,
+        progress=None,
+    ) -> BatchOutputResult:
+        items = tuple(items)
+        if not items:
+            raise BatchOutputError("Нечего печатать.")
+        cancelled = cancelled or threading.Event()
+        if cancelled.is_set():
+            raise BatchCancelled()
+
+        journal = self._journals[kind]
+        records = self._journal_records(kind, items)
+        operation_id = self._prepare(journal, records, path)
+        total = self._page_count(kind, len(items))
+        pages = self._pages(kind, items, total, cancelled, progress)
+        try:
+            self._save_pdf_pages(pages, path)
+        except BatchCancelled:
+            self._try_cancel(journal, operation_id)
+            raise
+        except Exception as exc:
+            self._try_cancel(journal, operation_id)
+            raise BatchOutputError(str(exc)) from exc
+
+        try:
+            self._confirm(journal, operation_id)
+        except Exception as exc:
+            raise BatchOutputError(str(exc)) from exc
+
+        if kind == "pass":
+            try:
+                self._update_cache(items)
+            except Exception as exc:
+                raise BatchOutputError(str(exc)) from exc
+        return BatchOutputResult(
+            kind=kind,
+            path=path,
+            item_count=len(items),
+            page_count=total,
+        )
+
+    def _pages(self, kind, items, total, cancelled, progress):
+        builder = self._pass_page if kind == "pass" else self._badge_page
+        step = 2 if kind == "pass" else 9
+        for page_index, start in enumerate(range(0, len(items), step), 1):
+            if cancelled.is_set():
+                raise BatchCancelled()
+            yield builder(items, start)
+            if progress is not None:
+                progress(page_index, total)
+
+    def _pass_page(self, items, start):
+        common = self._pass_common(items[start])
+        first = self._render_pass(items[start], common)
+        second = None
+        if start + 1 < len(items):
+            second = self._render_pass(items[start + 1], common)
+        sheet = self._build_pass_sheet(first, second)
+        self._decorate_pass_sheet(sheet)
+        return sheet
+
+    def _badge_page(self, items, start):
+        images = [self._render_badge(item) for item in items[start:start + 9]]
+        return self._build_badge_grid(images)
+
+    @staticmethod
+    def _pass_common(item):
+        return {
+            "issue_date": item.get("issue_date", ""),
+            "valid_until": item.get("valid_until", ""),
+            "otb_post": item.get("otb_post", ""),
+            "otb_name": item.get("otb_name", ""),
+            "is_temporary": bool(item.get("is_temporary")),
+        }
+
+    @staticmethod
+    def _journal_records(kind, items):
+        if kind == "badge":
+            return tuple(dict(item) for item in items)
+        records = []
+        for item in items:
+            record = dict(item)
+            record["zone"] = item.get("territory") or "Основная (Без зоны)"
+            record["driver"] = item.get("driver_full", "")
+            records.append(record)
+        return tuple(records)
+
+    @staticmethod
+    def _page_count(kind, item_count: int) -> int:
+        per_page = 2 if kind == "pass" else 9
+        return (item_count + per_page - 1) // per_page
+
+    def _try_cancel(self, journal, operation_id) -> None:
+        try:
+            self._cancel(journal, operation_id)
+        except Exception:
+            pass
 
     @staticmethod
     def _cell_reader(row):
