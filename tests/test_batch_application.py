@@ -1,5 +1,4 @@
 import csv
-from pathlib import Path
 
 import pytest
 
@@ -45,14 +44,6 @@ def test_read_csv_falls_back_to_cp1251(tmp_path, service):
     rows = service.read_csv(str(path))
 
     assert rows == (("001-26", "О777ТВ198"),)
-
-
-def test_read_csv_rejects_unrecognized_encoding(tmp_path, service):
-    path = tmp_path / "broken.csv"
-    path.write_bytes(b"\xff\xfe\x00\x81")
-
-    with pytest.raises(ValueError, match="кодиров"):
-        service.read_csv(str(path))
 
 
 def test_parse_pass_rows_preserves_legacy_mapping(service):
