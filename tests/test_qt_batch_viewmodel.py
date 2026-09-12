@@ -5,6 +5,7 @@ from getpass_app.models.batch import (
     BatchReview,
     BatchReviewRow,
 )
+from getpass_app.services.batch_service import BatchCancelled
 from getpass_qt.viewmodels.batch_viewmodel import BatchViewModel
 
 
@@ -168,3 +169,26 @@ def test_cancel_marks_current_worker_and_error_review_blocks_generation(qtbot):
     vm.cancel()
 
     assert pool.started[0].cancelled.is_set()
+
+
+def test_worker_cancellation_emits_explicit_user_facing_status(qtbot):
+    service = FakeBatchService()
+    pool = FakePool()
+    vm = BatchViewModel(service, pool=pool)
+    vm.load_csv("passes.csv")
+    failures = []
+    results = []
+    vm.operation_failed.connect(failures.append)
+    vm.output_succeeded.connect(results.append)
+
+    def cancelled_output(*_args, **_kwargs):
+        raise BatchCancelled()
+
+    service.generate_pdf = cancelled_output
+    assert vm.generate_pdf("passes.pdf") is True
+
+    pool.started[0].run()
+
+    assert failures == ["Массовая печать отменена."]
+    assert results == []
+    assert vm.busy is False
