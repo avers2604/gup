@@ -26,6 +26,13 @@ def test_tm5_private_pki_assets_and_scripts_exist():
     assert 'TM5-Root-CA.cer' in install_script
 
 
+def test_private_key_files_are_ignored_by_git():
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert "*.pfx" in gitignore
+    assert "*.p12" in gitignore
+    assert "*.key" in gitignore
+
+
 def test_release_workflows_support_tm5_private_signing():
     for name in ("build-exe.yml", "release.yml"):
         workflow = _workflow(name)
