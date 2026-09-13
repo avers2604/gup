@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from getpass_app.models.diagnostics import DiagnosticsSnapshot
 from getpass_app.models.journal import JournalField, JournalSnapshot
+from getpass_app.models.preferences import OperatorDefaults
 from getpass_app.services.backup_service import BackupService
 from getpass_app.services.batch_service import BatchService
 from getpass_app.services.diagnostics_service import DiagnosticsService
@@ -155,7 +156,11 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _vehicle_viewmodel(*, self_test: bool) -> VehiclePassViewModel:
+def _vehicle_viewmodel(
+    *,
+    self_test: bool,
+    defaults: OperatorDefaults,
+) -> VehiclePassViewModel:
     if self_test:
         service = VehiclePassService(
             lookup=lambda plate: None,
@@ -165,10 +170,14 @@ def _vehicle_viewmodel(*, self_test: bool) -> VehiclePassViewModel:
         )
     else:
         service = VehiclePassService()
-    return VehiclePassViewModel(service)
+    return VehiclePassViewModel(service, defaults=defaults)
 
 
-def _employee_badge_viewmodel(*, self_test: bool) -> EmployeeBadgeViewModel:
+def _employee_badge_viewmodel(
+    *,
+    self_test: bool,
+    defaults: OperatorDefaults,
+) -> EmployeeBadgeViewModel:
     if self_test:
         service = EmployeeBadgeService(
             journal=_SelfTestBadgeJournal(),
@@ -184,12 +193,16 @@ def _employee_badge_viewmodel(*, self_test: bool) -> EmployeeBadgeViewModel:
         )
     else:
         service = EmployeeBadgeService()
-    return EmployeeBadgeViewModel(service)
+    return EmployeeBadgeViewModel(service, defaults=defaults)
 
 
-def _batch_viewmodel(*, self_test: bool) -> BatchViewModel:
+def _batch_viewmodel(
+    *,
+    self_test: bool,
+    defaults: OperatorDefaults,
+) -> BatchViewModel:
     service = _SelfTestBatchService() if self_test else BatchService()
-    return BatchViewModel(service)
+    return BatchViewModel(service, defaults=defaults)
 
 
 def _journal_viewmodel(*, self_test: bool) -> JournalViewModel:
@@ -282,13 +295,21 @@ def main(argv: list[str] | None = None) -> int:
 
     theme = ThemeManager(app, settings)
     theme.load()
+    operator_defaults = settings.load_operator_defaults()
     window = MainWindow(
         theme_manager=theme,
-        vehicle_viewmodel=_vehicle_viewmodel(self_test=args.self_test),
-        employee_badge_viewmodel=_employee_badge_viewmodel(
-            self_test=args.self_test
+        vehicle_viewmodel=_vehicle_viewmodel(
+            self_test=args.self_test,
+            defaults=operator_defaults,
         ),
-        batch_viewmodel=_batch_viewmodel(self_test=args.self_test),
+        employee_badge_viewmodel=_employee_badge_viewmodel(
+            self_test=args.self_test,
+            defaults=operator_defaults,
+        ),
+        batch_viewmodel=_batch_viewmodel(
+            self_test=args.self_test,
+            defaults=operator_defaults,
+        ),
         journal_viewmodel=_journal_viewmodel(self_test=args.self_test),
         operations_viewmodel=_operations_viewmodel(self_test=args.self_test),
         backups_viewmodel=_backups_viewmodel(self_test=args.self_test),
