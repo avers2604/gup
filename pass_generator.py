@@ -42,14 +42,16 @@ def _install_crash_handler() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    from getpass_qt.app import main as qt_main
 
     if "--self-test" in args:
+        from getpass_qt.app import main as qt_main
+
         return qt_main(args)
 
     _install_crash_handler()
     from getpass_core import config
     from getpass_core.instance import single_instance
+    from getpass_qt.app import main as qt_main
 
     with single_instance(config.DATA_DIR):
         return qt_main(args)
