@@ -2,7 +2,7 @@
 
 **Status:** NOT YET COMPLETED. This checklist cannot be completed by CI. It must be executed on the target Windows workstation with the real production database copy, configured printers and operator present.
 
-**Release gate:** do **not** create/publish stable tag `v2.0.0` until every required item below is checked, trusted Authenticode signing is available, and the final decision is recorded as `ACCEPTED`.
+**Release gate:** do **not** create/publish stable tag `v2.0.0` until every required item below is checked, TM5 Authenticode signing is trusted on the target workstation, and the final decision is recorded as `ACCEPTED`.
 
 ## Test environment
 
@@ -17,6 +17,25 @@
 - Card/CR80 printer model (if separate): ____________________
 - Candidate commit / build: ____________________
 - Installer SHA256: ____________________
+
+## TM5 Private PKI trust precondition
+
+The selected signing route for the internal v2.0 rollout is **TM5 Private PKI**. The public root is `certs/TM5-Root-CA.cer`.
+
+Expected root SHA-256 fingerprint:
+
+`86742AE7A08246595855655EB5961417BE75A553521947CD8A26933C0B55C95C`
+
+- [ ] Before installing trust, verify the root SHA-256 fingerprint matches the value above.
+- [ ] Install `TM5 Root CA` into `Trusted Root Certification Authorities` through GPO/Intune or `tools/install_tm5_root.ps1` from an elevated PowerShell session.
+- [ ] Verify `TM5 Root CA` is present in `Cert:\LocalMachine\Root` and no unexpected replacement root with the same display name exists.
+- [ ] Verify `GET-Passes.exe` returns `Status: Valid` from `Get-AuthenticodeSignature`.
+- [ ] Verify `GET-Passes-Legacy.exe` returns `Status: Valid`.
+- [ ] Verify `GET-Passes-Setup.exe` returns `Status: Valid`.
+- [ ] Verify the signer leaf subject contains `CN=TM5` and its EKU is Code Signing.
+- [ ] Record the signing certificate thumbprint/fingerprint used for this candidate: ____________________
+
+**Do not** import `TM5-Root-CA-Backup.pfx` or any private key on a workstation. Only the public root `.cer` is deployed to clients.
 
 ## Preconditions
 
@@ -106,7 +125,8 @@
 - [ ] No renderer/layout regression was observed on printed output.
 - [ ] No data-loss/schema-compatibility issue was observed.
 - [ ] Rollback path was demonstrated successfully.
-- [ ] Trusted signing is configured for the stable release workflow.
+- [ ] TM5 Root CA trust is deployed to the intended workstation population.
+- [ ] Signed stable workflow is configured with the TM5 code-signing PFX secrets.
 
 Decision: **PENDING / ACCEPTED / REJECTED**
 
