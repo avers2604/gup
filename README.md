@@ -40,14 +40,15 @@ Headless/self-test нового интерфейса:
 python -m getpass_qt --self-test
 ```
 
-В Phase 4 маршруты **«Пропуск ТС»**, **«Пропуск работника»**, **«Массовая печать»**,
-**«Журналы»**, **«Незавершённые»**, **«Резервные копии»** и **«Диагностика»**
-уже являются реальными PySide6 workflow. Маршрут ТС поддерживает две формы
-пропуска на А4 или один пропуск на А5, автоподстановку только данных автомобиля,
-live preview через существующий renderer, сохранение PDF, одностороннюю/
-двустороннюю печать и durable issuance с записью в действующий SQLite-журнал
-после успешного внешнего вывода. Старые ФИО водителя, телефон и зона допуска
-по госномеру не восстанавливаются.
+К завершению Phase 4 все девять маршрутов shell — **«Главная»**, **«Пропуск ТС»**,
+**«Пропуск работника»**, **«Массовая печать»**, **«Журналы»**, **«Незавершённые»**,
+**«Резервные копии»**, **«Диагностика»** и **«Настройки»** — являются реальными
+PySide6 workflow. Маршрут ТС поддерживает две формы пропуска на А4 или один
+пропуск на А5, автоподстановку только данных автомобиля, live preview через
+существующий renderer, сохранение PDF, одностороннюю/двустороннюю печать и
+durable issuance с записью в действующий SQLite-журнал после успешного внешнего
+вывода. Старые ФИО водителя, телефон и зона допуска по госномеру не
+восстанавливаются.
 
 Маршрут работника использует существующий без изменений renderer бейджа,
 кадрирование фото 3:4 через общую core-геометрию, live preview, предупреждения
@@ -79,11 +80,17 @@ checksum/SQLite integrity validation и rollback при ошибке. Созда
 **«Диагностика»** формирует read-only snapshot с версией Python, путями данных,
 размером базы, `PRAGMA integrity_check` и последними резервными копиями.
 
-Маршрут **«Настройки»** пока остаётся следующим шагом миграции и полноценно
-работает в production Tkinter-приложении. Phase 4 не меняет SQLite schema,
-внешний вид печатных форм, production entry point, release pipeline или
-production installer. В Windows CI отдельно собирается `GET-Passes-Qt-Preview.exe`;
-он не подписывается и не публикуется как production release.
+Маршрут **«Настройки»** управляет операторскими defaults для новых форм ТС,
+бейджей и массовой печати и содержит отдельную вкладку **«Черный список»**.
+Blacklist использует существующий `blacklist.json` через application boundary и
+`QAbstractTableModel`/`QTableView`; добавление и удаление не вводят новый формат
+хранения. Сохранённые defaults применяются при создании новых Qt workflow и не
+переписывают уже открытую форму автоматически.
+
+Phase 4 не меняет SQLite schema, внешний вид печатных форм, production entry
+point, release pipeline или production installer. В Windows CI отдельно
+собирается `GET-Passes-Qt-Preview.exe`; он не подписывается и не публикуется как
+production release.
 
 ## Сборка в один EXE
 
@@ -260,7 +267,7 @@ getpass_ui/           production-интерфейс Tkinter
   crop_window.py        кадрирование фотографии, овальная направляющая
   batch.py              массовая печать
   widgets.py            общие элементы (прокрутка, диалог прогресса)
-getpass_qt/           PySide6 Phase-4 preview: ТС + бейдж + batch + журналы + recovery + backup + diagnostics
+getpass_qt/           PySide6 Phase-4 preview: все 9 shell workflow + settings/blacklist
 tests/                автотесты
 ```
 
@@ -277,7 +284,7 @@ tests/                автотесты
 pip install -r requirements-dev.txt
 python -m pytest                    # логика, хранилище, renderer, Tkinter и PySide6 preview
 xvfb-run -a python -m pytest        # + headless-проверка интерфейсов (Linux/CI)
-python -m getpass_qt --self-test    # smoke: shell + ТС + бейдж + batch + журналы + recovery + backup + diagnostics
+python -m getpass_qt --self-test    # smoke: все реальные Phase-4 маршруты, включая settings
 python pass_generator.py --self-test
 ```
 
@@ -312,17 +319,16 @@ EXE и прежний production installer.
 
 ## Статус миграции на PySide6
 
-Phase 4 переносит операторские workflow после выдачи документов: **«Журналы»**,
-**«Незавершённые»**, **«Массовая печать»**, **«Резервные копии»** и
-**«Диагностика»**. Они работают поверх тех же SQLite-журналов, durable issuance,
-render/PDF и backup-механизмов, что и production Tkinter, но используют
-UI-независимый application layer, MVVM-lite, Qt model/view и `QThreadPool` для
-длительных операций. Ранее перенесённые **«Пропуск ТС»** и
-**«Пропуск работника»** остаются полноценными PySide6 workflow без изменения
-печатного результата.
+Phase 4 code migration завершена: все девять маршрутов shell теперь имеют
+реальные PySide6 workflow. ТС, работники, массовая печать, журналы,
+незавершённые операции, backup/restore, диагностика и настройки работают поверх
+существующих core/storage/render/backup механизмов через UI-независимый
+application layer, MVVM-lite, Qt model/view и `QThreadPool` там, где операции
+могут быть длительными. Раздел «Настройки» сохраняет операторские defaults для
+новых workflow и управляет существующим blacklist через model/view без изменения
+формата `blacklist.json`.
 
 Это всё ещё **не production cutover**: `pass_generator.py`, production
-PyInstaller/Inno и release pipeline остаются на Tkinter. Следующие независимые
-срезы Phase 4 должны перенести управление blacklist и настройки. Физическая
-приёмка на рабочем месте и реальном принтере также остаётся обязательным
-отдельным этапом перед переключением production.
+PyInstaller/Inno и release pipeline остаются на Tkinter. Следующий этап —
+Phase 5: переключение production entry point на PySide6 только после финальной
+CI/Windows-проверки и физической приёмки на рабочем месте и реальном принтере.
