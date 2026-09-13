@@ -76,10 +76,12 @@ def test_inspect_then_matching_restore_requires_completed_inspection(qtbot):
     assert inspections[-1].path == "backup.zip"
     assert vm.restore("other.zip", None) is False
     assert len(pool.started) == 1
+    assert vm.restore("backup.zip", None) is False
 
+    assert vm.inspect("backup.zip", None) is True
+    pool.started[-1].run()
     assert vm.restore("backup.zip", None) is True
-    assert len(pool.started) == 2
-    assert service.calls == [("inspect", "backup.zip", None)]
+    assert len(pool.started) == 3
     pool.started[-1].run()
 
     assert service.calls[-1] == ("restore", "backup.zip", None)
