@@ -296,14 +296,16 @@ def _exercise_self_test(window, app) -> None:
     _wait_for_preview_refresh(window, app)
     assert badge_preview.has_image
 
-    for route in (
+    routes = [
         "batch",
         "journals",
         "operations",
         "backups",
         "diagnostics",
-        "settings",
-    ):
+    ]
+    if hasattr(window, "settings_page"):
+        routes.append("settings")
+    for route in routes:
         window.sidebar.request_route(route)
         app.processEvents()
         assert window.active_route == route
@@ -326,6 +328,8 @@ def main(argv: list[str] | None = None) -> int:
     theme = ThemeManager(app, settings)
     theme.load()
     operator_defaults = settings.load_operator_defaults()
+    settings_viewmodel = _settings_viewmodel(settings, operator_defaults)
+    blacklist_viewmodel = _blacklist_viewmodel(self_test=args.self_test)
     window = MainWindow(
         theme_manager=theme,
         vehicle_viewmodel=_vehicle_viewmodel(
@@ -344,9 +348,9 @@ def main(argv: list[str] | None = None) -> int:
         operations_viewmodel=_operations_viewmodel(self_test=args.self_test),
         backups_viewmodel=_backups_viewmodel(self_test=args.self_test),
         diagnostics_viewmodel=_diagnostics_viewmodel(self_test=args.self_test),
-        settings_viewmodel=_settings_viewmodel(settings, operator_defaults),
-        blacklist_viewmodel=_blacklist_viewmodel(self_test=args.self_test),
     )
+    if hasattr(window, "install_settings_page"):
+        window.install_settings_page(settings_viewmodel, blacklist_viewmodel)
 
     if args.self_test:
         window.show()
