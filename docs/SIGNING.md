@@ -8,11 +8,13 @@ GET-Passes поддерживает три способа Authenticode-подп�
 
 Если ни один набор signing secrets не настроен, workflow продолжает собирать и тестировать приложение, но шаги подписи имеют статус `skipped`. Такой артефакт явно маркируется **UNSIGNED**.
 
-## TM5 — production profile
+## TM5 — целевое имя издателя
 
-Для GET-Passes 2.0 имя Azure Artifact Signing certificate profile закреплено в workflow как **`TM5`**. Оно не хранится в GitHub Secrets и не может быть случайно подменено конфигурацией релиза.
+Цель для GET-Passes 2.0 — публично доверенная подпись с издателем **`TM5`**, если Microsoft подтвердит `TM5` как допустимую юридическую/DBA-идентичность.
 
-Важно различать **имя profile** и **имя издателя в Windows**. Microsoft Artifact Signing Public Trust не разрешает произвольные `CN`/`O`: subject сертификата формируется из проверенной публичной идентичности. Поэтому Windows покажет `TM5` как издателя только если Microsoft подтвердит `TM5` как допустимую юридическую/DBA-идентичность. Если проверенная организация имеет другое юридическое имя, именно оно будет показано в свойствах цифровой подписи.
+Техническое имя Azure Artifact Signing certificate profile закреплено в workflow как **`TM5-CodeSign`**. Это отдельная сущность: Microsoft требует для certificate profile имя длиной от 5 до 100 символов, поэтому профиль буквально `TM5` недопустим. `TM5-CodeSign` не хранится в GitHub Secrets и не может быть случайно подменён конфигурацией релиза.
+
+Важно различать **имя profile** и **имя издателя в Windows**. Microsoft Artifact Signing Public Trust не разрешает произвольные `CN`/`O`: subject сертификата формируется из проверенной публичной идентичности. Поэтому Windows покажет `TM5` как издателя только если Microsoft подтвердит `TM5` как допустимую legal/DBA identity. Если проверенная организация имеет другое юридическое имя, именно оно будет показано в свойствах цифровой подписи.
 
 ## Вариант A — Azure Artifact Signing Public Trust (рекомендуется)
 
@@ -22,9 +24,9 @@ GET-Passes поддерживает три способа Authenticode-подп�
 
 Microsoft требует пройти Public identity validation в Azure Portal. Этот шаг нельзя завершить через Azure CLI/API, потому что он включает проверку личности/организации. После завершения скопируйте **Identity validation Id**.
 
-Если требуется, чтобы пользователь Windows видел издателя `TM5`, сама идентичность `TM5` должна быть подтверждена Microsoft как организация/DBA. Простое имя profile `TM5` не меняет subject сертификата.
+Если требуется, чтобы пользователь Windows видел издателя `TM5`, сама идентичность `TM5` должна быть подтверждена Microsoft как организация/DBA. Простое имя технического profile не меняет subject сертификата.
 
-### 2. Создание account + Public Trust profile TM5
+### 2. Создание account + Public Trust profile TM5-CodeSign
 
 После `az login` выполните:
 
@@ -40,10 +42,10 @@ pwsh -File .\tools\provision_tm5_artifact_signing.ps1 `
 - устанавливает/обновляет Azure CLI extension `artifact-signing`;
 - создаёт resource group, если его ещё нет;
 - создаёт Artifact Signing account Basic SKU, если его ещё нет;
-- создаёт certificate profile **`TM5`** типа **`PublicTrust`**;
+- создаёт certificate profile **`TM5-CodeSign`** типа **`PublicTrust`**;
 - выводит endpoint и account name, которые нужны GitHub Actions.
 
-Параметры `-ResourceGroup`, `-Location` и `-AccountName` можно переопределить. Если `-AccountName` не задан, скрипт формирует стабильное уникальное имя из subscription ID.
+Параметры `-ResourceGroup`, `-Location` и `-AccountName` можно переопределить. Если `-AccountName` не задан, скрипт формирует стабильное уникальное имя из subscription ID. Параметр `-ProfileName` также существует, но production workflow ожидает `TM5-CodeSign`, поэтому менять его для релизной инфраструктуры не следует.
 
 ### 3. GitHub OIDC
 
@@ -55,9 +57,9 @@ Repository secrets:
 - `AZURE_ARTIFACT_SIGNING_ENDPOINT`
 - `AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME`
 
-Отдельный secret для имени certificate profile **не нужен**: production/release workflows жёстко используют `TM5`.
+Отдельный secret для имени certificate profile **не нужен**: production/release workflows жёстко используют `TM5-CodeSign`.
 
-App Registration, используемая GitHub OIDC, должна иметь роль **Artifact Signing Certificate Profile Signer** для profile `TM5`.
+App Registration, используемая GitHub OIDC, должна иметь роль **Artifact Signing Certificate Profile Signer** для profile `TM5-CodeSign`.
 
 Пример endpoint зависит от региона signing account, например `https://weu.codesigning.azure.net/` для West Europe. Используйте `accountUri`, который выводит provisioning-скрипт.
 
@@ -105,7 +107,7 @@ Production pipeline подписывает в таком порядке:
 4. подписывается сам `GET-Passes-Setup.exe`;
 5. все подписи проверяются через `Get-AuthenticodeSignature`.
 
-Для Azure Artifact Signing все три файла подписываются profile `TM5`. Если этот способ не настроен, используется Key Vault PFX, затем обычный PFX fallback.
+Для Azure Artifact Signing все три файла подписываются profile `TM5-CodeSign`. Если этот способ не настроен, используется Key Vault PFX, затем обычный PFX fallback.
 
 ## Проверка локально
 
