@@ -76,3 +76,11 @@ def test_production_launcher_is_qt_only_and_legacy_launcher_preserves_tkinter():
     assert "from tkinter import messagebox" not in production
     assert "from getpass_ui.app import App" in legacy
     assert "enable_dpi_awareness" in legacy
+
+
+def test_qt_runtime_uses_production_name_not_preview_name():
+    source = (ROOT / "getpass_qt" / "app.py").read_text(encoding="utf-8")
+
+    assert 'argparse.ArgumentParser(prog="GET-Passes")' in source
+    assert 'QApplication(["GET-Passes"])' in source
+    assert "GET-Passes Qt Preview" not in source
