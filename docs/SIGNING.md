@@ -1,53 +1,123 @@
 # Цифровая подпись Windows-сборок
 
-GET-Passes поддерживает три способа Authenticode-подписи в GitHub Actions. Приоритет: **Azure Artifact Signing Public Trust → Azure Key Vault PFX → PFX в GitHub Secrets**.
+GET-Passes 2.0 поддерживает собственную корпоративную подпись **TM5 Private PKI** и внешние публично доверенные варианты. Для текущего внутреннего сценария приоритет в workflow такой:
 
-## Важно
+1. **TM5 Private PKI**;
+2. Azure Artifact Signing Public Trust;
+3. Azure Key Vault PFX;
+4. обычный PFX fallback.
 
-Самоподписанный сертификат не решает задачу доверия Windows/SmartScreen и не считается production-подписью. Доверенный издатель появляется только после подключения реального публично доверенного code-signing сертификата или управляемого сервиса подписи.
+## TM5 Private PKI — текущий вариант
 
-Если ни один набор signing secrets не настроен, workflow продолжает собирать и тестировать приложение, но шаги подписи имеют статус `skipped`. Такой артефакт явно маркируется **UNSIGNED**.
+Цепочка состоит из двух сертификатов:
 
-## TM5 — целевое имя издателя
+- **TM5 Root CA** — собственный корневой центр сертификации;
+- **TM5 Code Signing** — leaf-сертификат с subject `CN=TM5, O=TM5` и EKU Code Signing `1.3.6.1.5.5.7.3.3`.
 
-Цель для GET-Passes 2.0 — публично доверенная подпись с издателем **`TM5`**, если Microsoft подтвердит `TM5` как допустимую юридическую/DBA-идентичность.
+Поэтому на машине, где `TM5 Root CA` добавлен в Trusted Root Certification Authorities, Windows проверяет подпись как доверенную и издатель leaf-сертификата отображается как **TM5**.
 
-Техническое имя Azure Artifact Signing certificate profile закреплено в workflow как **`TM5-CodeSign`**. Это отдельная сущность: Microsoft требует для certificate profile имя длиной от 5 до 100 символов, поэтому профиль буквально `TM5` недопустим. `TM5-CodeSign` не хранится в GitHub Secrets и не может быть случайно подменён конфигурацией релиза.
+Важно: эта цепочка **не является публично доверенной** для произвольного Windows-компьютера. Доверие появляется только после установки публичного `TM5 Root CA` на конкретную машину или после централизованного распространения через GPO/Intune/другую систему управления устройствами. Microsoft рекомендует управлять доверенными корнями централизованно через Group Policy для доменных компьютеров.
 
-Важно различать **имя profile** и **имя издателя в Windows**. Microsoft Artifact Signing Public Trust не разрешает произвольные `CN`/`O`: subject сертификата формируется из проверенной публичной идентичности. Поэтому Windows покажет `TM5` как издателя только если Microsoft подтвердит `TM5` как допустимую legal/DBA identity. Если проверенная организация имеет другое юридическое имя, именно оно будет показано в свойствах цифровой подписи.
+Публичный root хранится в репозитории:
 
-## Вариант A — Azure Artifact Signing Public Trust (рекомендуется)
+`certs/TM5-Root-CA.cer`
 
-Это основной вариант для публично доверенной подписи без хранения и выгрузки закрытого ключа в GitHub Actions. Сертификаты Public Trust выпускаются через Microsoft-managed PKI; закрытый ключ остаётся в управляемой инфраструктуре сервиса.
+Его SHA-256 fingerprint:
 
-### 1. Единственный ручной шаг — identity validation
+`86742AE7A08246595855655EB5961417BE75A553521947CD8A26933C0B55C95C`
 
-Microsoft требует пройти Public identity validation в Azure Portal. Этот шаг нельзя завершить через Azure CLI/API, потому что он включает проверку личности/организации. После завершения скопируйте **Identity validation Id**.
+Приватный ключ root **никогда не должен попадать** в GitHub, CI, installer или на рабочие станции.
 
-Если требуется, чтобы пользователь Windows видел издателя `TM5`, сама идентичность `TM5` должна быть подтверждена Microsoft как организация/DBA. Простое имя технического profile не меняет subject сертификата.
+### Готовый signing certificate
 
-### 2. Создание account + Public Trust profile TM5-CodeSign
+Для созданной текущей цепочки используются два приватных файла:
 
-После `az login` выполните:
+- `TM5-CodeSigning.pfx` — только для подписи сборок;
+- `TM5-Root-CA-Backup.pfx` — офлайн-резерв root private key для будущего перевыпуска leaf-сертификатов.
+
+Root backup храните отдельно и офлайн. В GitHub Actions загружается только `TM5-CodeSigning.pfx`.
+
+### GitHub Actions secrets
+
+Нужны два repository secrets:
+
+- `TM5_SIGN_CERT_BASE64` — base64 содержимого `TM5-CodeSigning.pfx`;
+- `TM5_SIGN_CERT_PASSWORD` — пароль signing PFX.
+
+Получить base64 локально:
 
 ```powershell
-pwsh -File .\tools\provision_tm5_artifact_signing.ps1 `
-  -SubscriptionId "<subscription-id>" `
-  -IdentityValidationId "<identity-validation-id>"
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("TM5-CodeSigning.pfx")) | Set-Clipboard
 ```
 
-Скрипт:
+Если эти два secrets настроены, `.github/workflows/build-exe.yml` и `.github/workflows/release.yml` выбирают TM5 Private PKI раньше остальных способов подписи. Hosted runner импортирует **только публичный** `certs\TM5-Root-CA.cer` во временное хранилище `Cert:\CurrentUser\Root`, подписывает SHA-256 через `signtool`, добавляет RFC3161 timestamp и проверяет `Get-AuthenticodeSignature`.
 
-- регистрирует `Microsoft.CodeSigning`;
-- устанавливает/обновляет Azure CLI extension `artifact-signing`;
-- создаёт resource group, если его ещё нет;
-- создаёт Artifact Signing account Basic SKU, если его ещё нет;
-- создаёт certificate profile **`TM5-CodeSign`** типа **`PublicTrust`**;
-- выводит endpoint и account name, которые нужны GitHub Actions.
+Приватный PFX создаётся во временном каталоге runner и исчезает вместе с runner после job.
 
-Параметры `-ResourceGroup`, `-Location` и `-AccountName` можно переопределить. Если `-AccountName` не задан, скрипт формирует стабильное уникальное имя из subscription ID. Параметр `-ProfileName` также существует, но production workflow ожидает `TM5-CodeSign`, поэтому менять его для релизной инфраструктуры не следует.
+### Доверие на рабочих компьютерах
 
-### 3. GitHub OIDC
+Предпочтительно раздавать root через **GPO**:
+
+`Computer Configuration → Policies → Windows Settings → Security Settings → Public Key Policies → Trusted Root Certification Authorities → Import`
+
+Импортируется только `TM5-Root-CA.cer`. После применения политики можно выполнить `gpupdate /force` или перезагрузить компьютер.
+
+Для одиночного ПК есть административный helper:
+
+```powershell
+pwsh -File .\tools\install_tm5_root.ps1
+```
+
+Скрипт проверяет subject и зафиксированный SHA-256 fingerprint перед импортом в `Cert:\LocalMachine\Root`.
+
+**Не устанавливайте root автоматически из GET-Passes Setup.exe.** Установщик приложения не должен самостоятельно расширять системное корневое доверие. Root разворачивается отдельным административным каналом.
+
+### Перевыпуск собственной PKI
+
+Скрипт для создания новой двухуровневой цепочки:
+
+```powershell
+pwsh -File .\tools\create_tm5_private_pki.ps1
+```
+
+Он создаёт `TM5 Root CA`, leaf `CN=TM5` с friendly name `TM5 Code Signing`, экспортирует публичные `.cer`, signing PFX и отдельный root-backup PFX. Пароли вводятся интерактивно.
+
+Если root когда-либо перевыпускается, необходимо одновременно:
+
+1. заменить `certs/TM5-Root-CA.cer`;
+2. обновить fingerprint в `tools/install_tm5_root.ps1`;
+3. заново распространить новый root на все доверенные рабочие станции;
+4. заменить `TM5_SIGN_CERT_BASE64` и `TM5_SIGN_CERT_PASSWORD`.
+
+Поэтому обычное продление делается выпуском нового leaf от существующего офлайн root, а сам root без необходимости не меняется.
+
+## Что подписывается TM5
+
+Production pipeline подписывает:
+
+1. `GET-Passes.exe` — основной PySide6 production candidate;
+2. `GET-Passes-Legacy.exe` — временный Tkinter rollback;
+3. `GET-Passes-Setup.exe` — Inno Setup installer.
+
+Для подписи используется SHA-256 и RFC3161 timestamp. Актуальный SignTool требует явно указывать digest (`/fd`) и timestamp digest (`/td`); в workflow оба заданы как SHA256.
+
+Проверка на доверенной рабочей станции:
+
+```powershell
+Get-AuthenticodeSignature .\GET-Passes.exe | Format-List Status,StatusMessage,SignerCertificate
+Get-AuthenticodeSignature .\GET-Passes-Legacy.exe | Format-List Status,StatusMessage,SignerCertificate
+Get-AuthenticodeSignature .\GET-Passes-Setup.exe | Format-List Status,StatusMessage,SignerCertificate
+```
+
+Ожидается `Status: Valid` и subject leaf-сертификата `CN=TM5`.
+
+## Публичная доверенность — опциональная альтернатива
+
+Если в будущем GET-Passes нужно будет распространять на произвольные компьютеры вне управляемого контура, собственный root недостаточен. Тогда нужен публично доверенный code-signing сертификат или Azure Artifact Signing Public Trust.
+
+В репозитории сохранён готовый Azure путь с техническим profile `TM5-CodeSign`. Публичное имя издателя там зависит от identity, подтверждённой Microsoft, и не может быть произвольным.
+
+### Azure Artifact Signing
 
 Repository secrets:
 
@@ -57,17 +127,17 @@ Repository secrets:
 - `AZURE_ARTIFACT_SIGNING_ENDPOINT`
 - `AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME`
 
-Отдельный secret для имени certificate profile **не нужен**: production/release workflows жёстко используют `TM5-CodeSign`.
+Provisioning helper:
 
-App Registration, используемая GitHub OIDC, должна иметь роль **Artifact Signing Certificate Profile Signer** для profile `TM5-CodeSign`.
+```powershell
+pwsh -File .\tools\provision_tm5_artifact_signing.ps1 `
+  -SubscriptionId "<subscription-id>" `
+  -IdentityValidationId "<identity-validation-id>"
+```
 
-Пример endpoint зависит от региона signing account, например `https://weu.codesigning.azure.net/` для West Europe. Используйте `accountUri`, который выводит provisioning-скрипт.
+### Azure Key Vault PFX
 
-Workflow выполняет `azure/login` через OIDC, затем вызывает официальный `azure/artifact-signing-action`, подписывает SHA-256 и добавляет RFC3161 timestamp через Azure timestamp service. Закрытый ключ не передаётся в репозиторий или GitHub Secrets.
-
-## Вариант B — доверенный PFX в Azure Key Vault
-
-Repository secrets:
+Fallback secrets:
 
 - `AZURE_CLIENT_ID`
 - `AZURE_TENANT_ID`
@@ -76,55 +146,17 @@ Repository secrets:
 - `AZURE_SIGN_CERT_NAME`
 - `AZURE_SIGN_CERT_PASSWORD`
 
-`AZURE_SIGN_CERT_NAME` должен указывать на секрет Key Vault, содержащий доверенный PFX в base64. GitHub OIDC service principal должен иметь минимально необходимые права на чтение этого секрета.
+### Generic PFX fallback
 
-Workflow скачивает PFX во временный каталог runner, подписывает через `signtool` SHA-256 с RFC3161 timestamp и после сборки удаляет runner вместе с временным ключом.
-
-## Вариант C — PFX в GitHub Secrets
-
-Repository secrets:
+Fallback secrets:
 
 - `WINDOWS_SIGN_CERT_BASE64`
 - `WINDOWS_SIGN_CERT_PASSWORD`
 
-PowerShell для подготовки base64 из доверенного PFX **локально**:
-
-```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("codesign.pfx")) | Set-Clipboard
-```
-
-Содержимое буфера помещается в `WINDOWS_SIGN_CERT_BASE64`, пароль PFX — в `WINDOWS_SIGN_CERT_PASSWORD`.
-
-Не коммитьте PFX, пароль или base64 в репозиторий.
-
-## Что подписывается
-
-Production pipeline подписывает в таком порядке:
-
-1. `GET-Passes.exe` — основной PySide6 production candidate;
-2. `GET-Passes-Legacy.exe` — временный Tkinter rollback;
-3. Inno Setup включает уже подписанные EXE в `GET-Passes-Setup.exe`;
-4. подписывается сам `GET-Passes-Setup.exe`;
-5. все подписи проверяются через `Get-AuthenticodeSignature`.
-
-Для Azure Artifact Signing все три файла подписываются profile `TM5-CodeSign`. Если этот способ не настроен, используется Key Vault PFX, затем обычный PFX fallback.
-
-## Проверка локально
-
-```powershell
-Get-AuthenticodeSignature .\GET-Passes.exe | Format-List Status,StatusMessage,SignerCertificate
-Get-AuthenticodeSignature .\GET-Passes-Legacy.exe | Format-List Status,StatusMessage,SignerCertificate
-Get-AuthenticodeSignature .\GET-Passes-Setup.exe | Format-List Status,StatusMessage,SignerCertificate
-```
-
-Для production release ожидается `Status: Valid` у всех файлов.
-
-Даже валидная новая подпись не гарантирует мгновенное отсутствие предупреждения SmartScreen: репутация нового файла/издателя может накапливаться со временем. Важны стабильная проверенная identity и последовательная подпись всех последующих версий.
-
-## Почему код сам по себе не может сделать подпись публично доверенной
-
-GitHub Actions может выполнить Authenticode-подпись, но не может сам назначить себе доверие Windows. Корневое доверие контролируется Microsoft Root Certificate Program/публичными CA. Поэтому локально созданный self-signed `TM5` не является заменой Public Trust и намеренно не используется в production pipeline.
+Не коммитьте PFX, пароли или base64 приватных ключей в репозиторий.
 
 ## Stable release
 
-Workflow `.github/workflows/release.yml` предназначен для versioned tags (`v2.0.0`, `v2.0.1`, ...). Он проверяет соответствие тега версии в `pyproject.toml` и отказывается публиковать stable release, если не настроен ни один доверенный способ подписи. `v2.0.0` создаётся только после физической приёмки из `docs/PHYSICAL_ACCEPTANCE_2_0.md` и проверки доверенной подписи.
+`release.yml` допускает подписанный stable release при наличии TM5 Private PKI или одного из внешних signing-вариантов. При использовании собственной PKI stable build является доверенным **внутри контура, где установлен TM5 Root CA**, а не глобально в интернете.
+
+`v2.0.0` всё равно создаётся только после физической приёмки `docs/PHYSICAL_ACCEPTANCE_2_0.md` и проверки `Status: Valid` на целевой рабочей станции.
