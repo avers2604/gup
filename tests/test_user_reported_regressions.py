@@ -121,10 +121,11 @@ def test_otb_signature_captions_are_close_to_the_line(monkeypatch):
     }
 
 
-def test_release_workflows_support_azure_artifact_signing():
-    """Доверенная Azure-подпись использует Public Trust profile TM5-CodeSign."""
+def test_release_workflows_support_azure_artifact_signing_fallback():
+    """Azure Public Trust остаётся fallback после выбранной TM5 Private PKI."""
     for name in ("build-exe.yml", "release.yml"):
         workflow = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+        assert "HAS_TM5_PRIVATE_SIGNING_SECRETS" in workflow
         assert "HAS_ARTIFACT_SIGNING_SECRETS" in workflow
         assert "azure/artifact-signing-action@" in workflow
         assert "AZURE_ARTIFACT_SIGNING_ENDPOINT" in workflow
