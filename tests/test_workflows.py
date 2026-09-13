@@ -115,10 +115,10 @@ def test_phase5_production_workflows_build_qt_launcher_and_legacy_rollback():
         assert "GET-Passes-Qt-Preview" not in workflow
 
 
-def test_artifact_signing_public_profile_is_tm5():
+def test_artifact_signing_uses_valid_tm5_public_profile_name():
     for name in ("build-exe.yml", "release.yml"):
         workflow = _workflow(name)
-        assert "ARTIFACT_SIGNING_PROFILE: TM5" in workflow
+        assert "ARTIFACT_SIGNING_PROFILE: TM5-CodeSign" in workflow
         assert (
             "certificate-profile-name: ${{ env.ARTIFACT_SIGNING_PROFILE }}"
             in workflow
@@ -128,7 +128,7 @@ def test_artifact_signing_public_profile_is_tm5():
     provision = (
         ROOT / "tools" / "provision_tm5_artifact_signing.ps1"
     ).read_text(encoding="utf-8")
-    assert '[string]$ProfileName = "TM5"' in provision
+    assert '[string]$ProfileName = "TM5-CodeSign"' in provision
     assert 'az provider register --namespace "Microsoft.CodeSigning"' in provision
     assert "--profile-type PublicTrust" in provision
     assert "--identity-validation-id $IdentityValidationId" in provision
