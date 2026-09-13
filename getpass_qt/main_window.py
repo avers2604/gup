@@ -64,8 +64,6 @@ class MainWindow(QMainWindow):
         operations_viewmodel: OperationsViewModel,
         backups_viewmodel: BackupsViewModel,
         diagnostics_viewmodel: DiagnosticsViewModel,
-        settings_viewmodel: SettingsViewModel,
-        blacklist_viewmodel: BlacklistViewModel,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -131,11 +129,11 @@ class MainWindow(QMainWindow):
         self.diagnostics_page = DiagnosticsPage(diagnostics_viewmodel)
         self._add_page("diagnostics", self.diagnostics_page)
 
-        self.settings_page = SettingsPage(
-            settings_viewmodel,
-            blacklist_viewmodel,
+        self.settings_placeholder = MigrationPage(
+            ROUTE_LABELS["settings"],
+            "Раздел настроек подключается через application boundary.",
         )
-        self._add_page("settings", self.settings_page)
+        self._add_page("settings", self.settings_placeholder)
 
         for route in ROUTES[1:]:
             if route in _REAL_ROUTES:
@@ -165,6 +163,24 @@ class MainWindow(QMainWindow):
     @property
     def active_route(self) -> str:
         return self._viewmodel.active_route
+
+    def install_settings_page(
+        self,
+        settings_viewmodel: SettingsViewModel,
+        blacklist_viewmodel: BlacklistViewModel,
+    ) -> SettingsPage:
+        index = self._page_indexes["settings"]
+        previous = self.stack.widget(index)
+        self.stack.removeWidget(previous)
+        previous.deleteLater()
+
+        page = SettingsPage(settings_viewmodel, blacklist_viewmodel)
+        new_index = self.stack.insertWidget(index, page)
+        self._page_indexes["settings"] = new_index
+        self.settings_page = page
+        if self.active_route == "settings":
+            self.stack.setCurrentIndex(new_index)
+        return page
 
     def _add_page(self, route: str, page: QWidget) -> None:
         self._page_indexes[route] = self.stack.addWidget(page)
