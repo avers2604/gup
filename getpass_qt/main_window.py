@@ -9,14 +9,18 @@ from PySide6.QtWidgets import (
 )
 
 from getpass_qt.theme.manager import ThemeManager
+from getpass_qt.viewmodels.backups_viewmodel import BackupsViewModel
 from getpass_qt.viewmodels.batch_viewmodel import BatchViewModel
+from getpass_qt.viewmodels.diagnostics_viewmodel import DiagnosticsViewModel
 from getpass_qt.viewmodels.employee_badge_viewmodel import EmployeeBadgeViewModel
 from getpass_qt.viewmodels.journal_viewmodel import JournalViewModel
 from getpass_qt.viewmodels.main_viewmodel import ROUTES, MainViewModel
 from getpass_qt.viewmodels.operations_viewmodel import OperationsViewModel
 from getpass_qt.viewmodels.vehicle_pass_viewmodel import VehiclePassViewModel
+from getpass_qt.views.backups import BackupsPage
 from getpass_qt.views.batch import BatchPage
 from getpass_qt.views.dashboard import DashboardPage
+from getpass_qt.views.diagnostics import DiagnosticsPage
 from getpass_qt.views.employee_badge import EmployeeBadgePage
 from getpass_qt.views.journals import JournalsPage
 from getpass_qt.views.migration_page import MigrationPage
@@ -31,6 +35,8 @@ _REAL_ROUTES = frozenset({
     "batch",
     "journals",
     "operations",
+    "backups",
+    "diagnostics",
 })
 _MIGRATION_DESCRIPTIONS = {
     route: (
@@ -52,6 +58,8 @@ class MainWindow(QMainWindow):
         batch_viewmodel: BatchViewModel,
         journal_viewmodel: JournalViewModel,
         operations_viewmodel: OperationsViewModel,
+        backups_viewmodel: BackupsViewModel,
+        diagnostics_viewmodel: DiagnosticsViewModel,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -110,6 +118,12 @@ class MainWindow(QMainWindow):
 
         self.operations_page = OperationsPage(operations_viewmodel)
         self._add_page("operations", self.operations_page)
+
+        self.backups_page = BackupsPage(backups_viewmodel)
+        self._add_page("backups", self.backups_page)
+
+        self.diagnostics_page = DiagnosticsPage(diagnostics_viewmodel)
+        self._add_page("diagnostics", self.diagnostics_page)
 
         for route in ROUTES[1:]:
             if route in _REAL_ROUTES:

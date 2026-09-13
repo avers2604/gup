@@ -64,6 +64,8 @@ class _SelfTestWindow:
         batch_viewmodel,
         journal_viewmodel,
         operations_viewmodel,
+        backups_viewmodel,
+        diagnostics_viewmodel,
     ):
         self.active_route = "dashboard"
         self.stack = _SelfTestStack()
@@ -117,6 +119,8 @@ def test_qt_self_test_exercises_real_phase4_routes(monkeypatch):
         ("route", "batch"),
         ("route", "journals"),
         ("route", "operations"),
+        ("route", "backups"),
+        ("route", "diagnostics"),
     ]
 
 

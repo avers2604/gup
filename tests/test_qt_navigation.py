@@ -6,13 +6,17 @@ from getpass_app.models.journal import JournalField, JournalSnapshot
 from getpass_app.services.settings_service import SettingsService
 from getpass_qt.main_window import MainWindow
 from getpass_qt.theme.manager import ThemeManager
+from getpass_qt.viewmodels.backups_viewmodel import BackupsViewModel
 from getpass_qt.viewmodels.batch_viewmodel import BatchViewModel
+from getpass_qt.viewmodels.diagnostics_viewmodel import DiagnosticsViewModel
 from getpass_qt.viewmodels.employee_badge_viewmodel import EmployeeBadgeViewModel
 from getpass_qt.viewmodels.journal_viewmodel import JournalViewModel
 from getpass_qt.viewmodels.main_viewmodel import MainViewModel
 from getpass_qt.viewmodels.operations_viewmodel import OperationsViewModel
 from getpass_qt.viewmodels.vehicle_pass_viewmodel import VehiclePassViewModel
+from getpass_qt.views.backups import BackupsPage
 from getpass_qt.views.batch import BatchPage
+from getpass_qt.views.diagnostics import DiagnosticsPage
 from getpass_qt.views.employee_badge import EmployeeBadgePage
 from getpass_qt.views.journals import JournalsPage
 from getpass_qt.views.operations import OperationsPage
@@ -132,6 +136,22 @@ class FakeNavigationBatchService:
         raise AssertionError("navigation test must not generate PDF")
 
 
+class FakeNavigationBackupService:
+    def create(self, path, password):
+        raise AssertionError("navigation test must not create backup")
+
+    def inspect(self, path, password):
+        raise AssertionError("navigation test must not inspect backup")
+
+    def restore(self, path, password):
+        raise AssertionError("navigation test must not restore backup")
+
+
+class FakeNavigationDiagnosticsService:
+    def snapshot(self):
+        raise AssertionError("navigation test must not read diagnostics")
+
+
 def test_main_viewmodel_defaults_to_dashboard(qtbot):
     vm = MainViewModel()
     assert vm.active_route == "dashboard"
@@ -171,6 +191,8 @@ def _window(qapp):
     journal_vm = JournalViewModel(FakeNavigationJournalService())
     operations_vm = OperationsViewModel(FakeNavigationOperationsService())
     batch_vm = BatchViewModel(FakeNavigationBatchService())
+    backups_vm = BackupsViewModel(FakeNavigationBackupService())
+    diagnostics_vm = DiagnosticsViewModel(FakeNavigationDiagnosticsService())
     return MainWindow(
         theme_manager=manager,
         vehicle_viewmodel=vehicle_vm,
@@ -178,6 +200,8 @@ def _window(qapp):
         journal_viewmodel=journal_vm,
         operations_viewmodel=operations_vm,
         batch_viewmodel=batch_vm,
+        backups_viewmodel=backups_vm,
+        diagnostics_viewmodel=diagnostics_vm,
     )
 
 
@@ -192,6 +216,8 @@ def test_main_window_has_variant_a_sidebar_and_stack(qapp, qtbot):
     assert isinstance(window.journals_page, JournalsPage)
     assert isinstance(window.operations_page, OperationsPage)
     assert isinstance(window.batch_page, BatchPage)
+    assert isinstance(window.backups_page, BackupsPage)
+    assert isinstance(window.diagnostics_page, DiagnosticsPage)
 
 
 def test_sidebar_switches_to_vehicle_page(qapp, qtbot):
@@ -213,10 +239,8 @@ def test_employee_route_uses_real_employee_badge_page(qapp, qtbot):
 def test_phase4_routes_use_real_journal_and_operations_pages(qapp, qtbot):
     window = _window(qapp)
     qtbot.addWidget(window)
-
     window.sidebar.request_route("journals")
     assert window.stack.currentWidget() is window.journals_page
-
     window.sidebar.request_route("operations")
     assert window.stack.currentWidget() is window.operations_page
 
@@ -224,11 +248,18 @@ def test_phase4_routes_use_real_journal_and_operations_pages(qapp, qtbot):
 def test_batch_route_uses_real_batch_page(qapp, qtbot):
     window = _window(qapp)
     qtbot.addWidget(window)
-
     window.sidebar.request_route("batch")
-
     assert window.active_route == "batch"
     assert window.stack.currentWidget() is window.batch_page
+
+
+def test_backups_and_diagnostics_routes_use_real_pages(qapp, qtbot):
+    window = _window(qapp)
+    qtbot.addWidget(window)
+    window.sidebar.request_route("backups")
+    assert window.stack.currentWidget() is window.backups_page
+    window.sidebar.request_route("diagnostics")
+    assert window.stack.currentWidget() is window.diagnostics_page
 
 
 def test_dashboard_primary_action_navigates_to_vehicle(qapp, qtbot):

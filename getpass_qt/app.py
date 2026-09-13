@@ -7,8 +7,11 @@ from PIL import Image
 from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
+from getpass_app.models.diagnostics import DiagnosticsSnapshot
 from getpass_app.models.journal import JournalField, JournalSnapshot
+from getpass_app.services.backup_service import BackupService
 from getpass_app.services.batch_service import BatchService
+from getpass_app.services.diagnostics_service import DiagnosticsService
 from getpass_app.services.employee_badge_service import EmployeeBadgeService
 from getpass_app.services.journal_service import JournalService
 from getpass_app.services.operations_service import OperationsService
@@ -16,7 +19,9 @@ from getpass_app.services.settings_service import SettingsService
 from getpass_app.services.vehicle_pass_service import VehiclePassService
 from getpass_qt.main_window import MainWindow
 from getpass_qt.theme.manager import ThemeManager
+from getpass_qt.viewmodels.backups_viewmodel import BackupsViewModel
 from getpass_qt.viewmodels.batch_viewmodel import BatchViewModel
+from getpass_qt.viewmodels.diagnostics_viewmodel import DiagnosticsViewModel
 from getpass_qt.viewmodels.employee_badge_viewmodel import EmployeeBadgeViewModel
 from getpass_qt.viewmodels.journal_viewmodel import JournalViewModel
 from getpass_qt.viewmodels.operations_viewmodel import OperationsViewModel
@@ -115,6 +120,35 @@ class _SelfTestBatchService:
         return self._unexpected()
 
 
+class _SelfTestBackupService:
+    @staticmethod
+    def _unexpected():
+        raise AssertionError("self-test must not access backup files or data")
+
+    def create(self, _path, _password):
+        return self._unexpected()
+
+    def inspect(self, _path, _password):
+        return self._unexpected()
+
+    def restore(self, _path, _password):
+        return self._unexpected()
+
+
+class _SelfTestDiagnosticsService:
+    @staticmethod
+    def snapshot():
+        return DiagnosticsSnapshot(
+            python_version="self-test",
+            data_dir="self-test",
+            database_file="self-test",
+            backup_dir="self-test",
+            database_size_bytes=None,
+            sqlite_integrity="self-test",
+            recent_backups=(),
+        )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="GET-Passes Qt Preview")
     parser.add_argument("--self-test", action="store_true")
@@ -168,6 +202,16 @@ def _operations_viewmodel(*, self_test: bool) -> OperationsViewModel:
     return OperationsViewModel(service)
 
 
+def _backups_viewmodel(*, self_test: bool) -> BackupsViewModel:
+    service = _SelfTestBackupService() if self_test else BackupService()
+    return BackupsViewModel(service)
+
+
+def _diagnostics_viewmodel(*, self_test: bool) -> DiagnosticsViewModel:
+    service = _SelfTestDiagnosticsService() if self_test else DiagnosticsService()
+    return DiagnosticsViewModel(service)
+
+
 def _wait_for_preview_refresh(_window, app) -> None:
     loop = QEventLoop()
     QTimer.singleShot(250, loop.quit)
@@ -210,17 +254,16 @@ def _exercise_self_test(window, app) -> None:
     _wait_for_preview_refresh(window, app)
     assert badge_preview.has_image
 
-    window.sidebar.request_route("batch")
-    app.processEvents()
-    assert window.active_route == "batch"
-
-    window.sidebar.request_route("journals")
-    app.processEvents()
-    assert window.active_route == "journals"
-
-    window.sidebar.request_route("operations")
-    app.processEvents()
-    assert window.active_route == "operations"
+    for route in (
+        "batch",
+        "journals",
+        "operations",
+        "backups",
+        "diagnostics",
+    ):
+        window.sidebar.request_route(route)
+        app.processEvents()
+        assert window.active_route == route
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -248,6 +291,8 @@ def main(argv: list[str] | None = None) -> int:
         batch_viewmodel=_batch_viewmodel(self_test=args.self_test),
         journal_viewmodel=_journal_viewmodel(self_test=args.self_test),
         operations_viewmodel=_operations_viewmodel(self_test=args.self_test),
+        backups_viewmodel=_backups_viewmodel(self_test=args.self_test),
+        diagnostics_viewmodel=_diagnostics_viewmodel(self_test=args.self_test),
     )
 
     if args.self_test:
