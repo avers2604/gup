@@ -168,7 +168,7 @@ class _SelfTestBlacklistService:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="GET-Passes Qt Preview")
+    parser = argparse.ArgumentParser(prog="GET-Passes")
     parser.add_argument("--self-test", action="store_true")
     return parser
 
@@ -316,7 +316,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_test:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-    app = QApplication.instance() or QApplication(["GET-Passes Qt Preview"])
+    app = QApplication.instance() or QApplication(["GET-Passes"])
     if args.self_test:
         settings = SettingsService(
             load=lambda: {"theme": "light"},

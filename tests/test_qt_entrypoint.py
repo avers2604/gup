@@ -124,9 +124,11 @@ def test_qt_self_test_exercises_real_phase4_routes(monkeypatch):
     ]
 
 
-def test_phase4_keeps_tkinter_as_default_production_entrypoint():
-    source = (
-        Path(__file__).resolve().parents[1] / "pass_generator.py"
-    ).read_text(encoding="utf-8")
-    assert "from getpass_ui.app import App" in source
-    assert "from getpass_qt" not in source
+def test_phase5_uses_qt_for_production_and_keeps_tkinter_rollback():
+    root = Path(__file__).resolve().parents[1]
+    production = (root / "pass_generator.py").read_text(encoding="utf-8")
+    legacy = (root / "legacy_pass_generator.py").read_text(encoding="utf-8")
+
+    assert "from getpass_qt.app import main as qt_main" in production
+    assert "from getpass_ui.app import App" not in production
+    assert "from getpass_ui.app import App" in legacy

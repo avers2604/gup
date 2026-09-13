@@ -1,334 +1,216 @@
 # Система выпуска пропусков — СПб ГУП «Горэлектротранс»
 
-Настольное приложение для оформления пропусков на транспортные средства
-и постоянных пропусков (бейджей) работников: заполнение, предпросмотр,
-двусторонняя печать, журналы выдачи в SQLite, реестры и массовая печать
-из Excel/CSV. Интерфейс — карточный дизайн на палитре брендбука ГЭТ,
-со светлой и тёмной темой.
+Настольное приложение для оформления пропусков на транспортные средства и
+постоянных пропусков работников: заполнение, live preview, PDF/печать, журналы
+выдачи SQLite, незавершённые операции, массовая печать, backup/restore,
+диагностика, настройки и blacklist.
+
+## GET-Passes 2.0
+
+В ветке production-cutover основной интерфейс — **PySide6**. Стабильный релиз
+`v2.0.0` ещё не публикуется: перед merge/tag обязательны физическая приёмка на
+целевом рабочем месте/принтере и доверенная Authenticode-подпись. Полный протокол
+находится в [`docs/PHYSICAL_ACCEPTANCE_2_0.md`](docs/PHYSICAL_ACCEPTANCE_2_0.md),
+внешний gate отслеживается в issue #41.
+
+Основной запуск:
+
+```bash
+python pass_generator.py
+```
+
+Headless smoke production UI:
+
+```bash
+python pass_generator.py --self-test
+```
+
+Временный rollback на прежний Tkinter UI сохранён до завершения физической
+приёмки:
+
+```bash
+python legacy_pass_generator.py
+python legacy_pass_generator.py --self-test
+```
+
+`GET-Passes.exe` — production PySide6 candidate. `GET-Passes-Legacy.exe` —
+временный rollback, который поставляется рядом, но не получает отдельный ярлык.
+Оба используют существующие core/storage/data locations; отдельной базы данных
+для Qt нет.
 
 ## Запуск на Python
 
 ```bash
 python -m venv .venv
-. .venv/bin/activate    # Linux/macOS
-# .venv\Scripts\activate   # Windows PowerShell
-
+. .venv/bin/activate          # Linux/macOS
+# .venv\Scripts\activate     # Windows PowerShell
 python -m pip install -r requirements-dev.txt
 python pass_generator.py
 ```
 
-Требуется Python 3.13 или 3.14 с `tkinter` (релизная сборка использует Python 3.14.7).
+Поддерживается Python 3.13/3.14; Windows packaging использует Python 3.14.7.
+PySide6 закреплён в диапазоне 6.11.x. `tkinter` остаётся зависимостью только для
+rollback-исполняемого файла и legacy regression tests до Phase 6 cleanup.
 
-## PySide6 preview (GET-Passes 2.0 migration)
+## PySide6 workflows
 
-На Phase 4 production entry point по-прежнему остаётся текущим Tkinter-приложением:
+Все девять маршрутов shell являются реальными workflow:
 
-```bash
-python pass_generator.py
-```
+- **Главная** — навигация и быстрые действия;
+- **Пропуск ТС** — A4/A5, live preview, PDF, печать, оборот и durable issuance;
+- **Пропуск работника** — фото 3:4, CR80/A4, preview, PDF/печать и журнал;
+- **Массовая печать** — CSV UTF-8-SIG/CP1251, review, progress/cancel, batch PDF;
+- **Журналы** — model/view таблицы, фильтры, история, revoke и XLSX export;
+- **Незавершённые** — recovery prepared issuance операций;
+- **Резервные копии** — `.gupbak`/ZIP, inspect, integrity check и safe restore;
+- **Диагностика** — read-only runtime/paths/SQLite integrity snapshot;
+- **Настройки** — operator defaults и model/view управление blacklist.
 
-Новый PySide6 preview запускается отдельно и предназначен для разработки и
-проверки миграции GET-Passes 2.0:
+Длительные batch/backup/diagnostics операции выполняются вне GUI thread через
+`QThreadPool`/`QRunnable`.
 
-```bash
-python -m getpass_qt
-```
+## Совместимость данных и печати
 
-Headless/self-test нового интерфейса:
+Phase 5 **не меняет** SQLite schema, миграции, форматы журналов, пути данных,
+renderer, бланки, координаты, шрифты или assets. Существующий `gup.sqlite3`,
+`settings.json`, blacklist, photos и pending operations используются напрямую.
 
-```bash
-python -m getpass_qt --self-test
-```
+Бланки ТС и работников строятся существующими `getpass_core/blank.py` и
+`getpass_core/render.py`; `template.png` не требуется. Изменение UI не является
+изменением печатного макета.
 
-К завершению Phase 4 все девять маршрутов shell — **«Главная»**, **«Пропуск ТС»**,
-**«Пропуск работника»**, **«Массовая печать»**, **«Журналы»**, **«Незавершённые»**,
-**«Резервные копии»**, **«Диагностика»** и **«Настройки»** — являются реальными
-PySide6 workflow. Маршрут ТС поддерживает две формы пропуска на А4 или один
-пропуск на А5, автоподстановку только данных автомобиля, live preview через
-существующий renderer, сохранение PDF, одностороннюю/двустороннюю печать и
-durable issuance с записью в действующий SQLite-журнал после успешного внешнего
-вывода. Старые ФИО водителя, телефон и зона допуска по госномеру не
-восстанавливаются.
+Каталог данных выбирается действующим `getpass_core.config`:
 
-Маршрут работника использует существующий без изменений renderer бейджа,
-кадрирование фото 3:4 через общую core-геометрию, live preview, предупреждения
-о дубликатах и blacklist, три прежних формата (`card`, `a4_grid`, `a4_single`),
-PDF/печать и тот же durable issuance `prepare → output → confirm`.
+1. writable `data/` рядом с программой;
+2. каталог программы, если там уже находятся данные прежней версии;
+3. `%LOCALAPPDATA%\GET-Passes`, если запись рядом запрещена.
 
-PySide6-журналы используют `QAbstractTableModel`/`QTableView` и сохраняют
-существующую семантику журналов ТС и работников: поиск, статус, диапазон дат,
-контекстные фильтры, сортировку, пагинацию, редактирование с optimistic check,
-историю, аннулирование, предложение добавить запись в blacklist и экспорт
-текущей страницы в XLSX. Экран незавершённых выдач объединяет prepared-операции
-обоих журналов, различает готовый/отсутствующий файл и прямую печать, позволяет
-безопасно открыть существующий документ, подтвердить фактическую выдачу или
-отменить операцию.
+В каталоге данных находятся `settings.json`, `gup.sqlite3`, фотографии,
+`blacklist.json`, backups и `crash.log` согласно действующим core-механизмам.
 
-Маршрут массовой печати принимает прежние CSV-шаблоны ТС и бейджей (`;`,
-UTF-8-SIG/CP1251), показывает проверку импорта через `QTableView`, требует
-подтверждения предупреждений и формирует PDF существующими render-функциями:
-два пропуска ТС на А4 или сетку 3×3 бейджей. Генерация выполняется через
-`QThreadPool`/`QRunnable` с прогрессом и отменой; выдача сохраняет durable
-семантику `prepare → PDF → confirm`, а незавершённая операция остаётся доступна
-для recovery, если PDF уже записан, но журнал не удалось подтвердить.
+> Журналы, фото и backup-файлы содержат персональные данные. `.gupbak`
+> шифруется пользовательским паролем; обычный ZIP не шифруется и требует
+> ограниченного доступа к носителю.
 
-Маршрут **«Резервные копии»** использует существующий `getpass_core.backup`
-без изменения формата и правил восстановления: защищённый `.gupbak` с паролем
-или незашифрованный ZIP, обязательная проверка архива перед восстановлением,
-checksum/SQLite integrity validation и rollback при ошибке. Создание, проверка
-и восстановление выполняются через `QThreadPool`, не блокируя GUI. Маршрут
-**«Диагностика»** формирует read-only snapshot с версией Python, путями данных,
-размером базы, `PRAGMA integrity_check` и последними резервными копиями.
+## Сборка Windows
 
-Маршрут **«Настройки»** управляет операторскими defaults для новых форм ТС,
-бейджей и массовой печати и содержит отдельную вкладку **«Черный список»**.
-Blacklist использует существующий `blacklist.json` через application boundary и
-`QAbstractTableModel`/`QTableView`; добавление и удаление не вводят новый формат
-хранения. Сохранённые defaults применяются при создании новых Qt workflow и не
-переписывают уже открытую форму автоматически.
-
-Phase 4 не меняет SQLite schema, внешний вид печатных форм, production entry
-point, release pipeline или production installer. В Windows CI отдельно
-собирается `GET-Passes-Qt-Preview.exe`; он не подписывается и не публикуется как
-production release.
-
-## Сборка в один EXE
-
-> Для выпуска единым исполняемым файлом лучше собирать проект на Windows, потому что приложение использует Tkinter и оконный режим.
-
-### Windows (локально)
+Production EXE:
 
 ```powershell
-python -m pip install -r requirements-dev.txt
-python -m pip install pyinstaller
-
-$spec = @(
-  '--noconfirm',
-  '--clean',
-  '--onefile',
-  '--windowed',
-  '--icon', 'app_icon.ico',
-  '--name', 'GET-Passes'
-)
-
-if (Test-Path 'assets') { $spec += @('--add-data', 'assets;assets') }
-if (Test-Path 'fonts') { $spec += @('--add-data', 'fonts;fonts') }
-if (Test-Path 'fronts') { $spec += @('--add-data', 'fronts;fronts') }
-if (Test-Path 'app_icon.ico') { $spec += @('--add-data', 'app_icon.ico;.') }
-
-pyinstaller @spec pass_generator.py
+python -m PyInstaller --noconfirm --clean --onefile --windowed `
+  --icon app_icon.ico --name GET-Passes pass_generator.py
 ```
 
-После сборки исполняемый файл появится в папке `dist\GET-Passes.exe`.
-
-### Linux/macOS для проверки сборки
-
-В этом окружении сборка `PyInstaller` может не работать из-за отсутствия поддержки `tkinter`/shared library в системном Python. На Linux допустимо сборку проверять только в знакомой среде и обычно с `venv` на том же Python, где установлены системные зависимости, но для финального релиза лучший вариант остаётся Windows.
-
-### Рекомендуемая упаковка для релиза
-
-Если нужен именно единый `.exe`, оптимальная схема:
-
-1. собирать на `windows-latest` в GitHub Actions;
-2. включить `app_icon.ico` и ресурсы `assets/`/`fonts/` в артефакт;
-3. оставлять результат в одном zip-архиве рядом с `GET-Passes.exe`.
-
-Пример команды в GitHub Actions:
+Rollback EXE:
 
 ```powershell
-pyinstaller --noconfirm --clean --onefile --windowed --icon app_icon.ico --name GET-Passes `
-  --add-data "assets;assets" --add-data "fonts;fonts" --add-data "app_icon.ico;." pass_generator.py
+python -m PyInstaller --noconfirm --clean --onefile --windowed `
+  --icon app_icon.ico --name GET-Passes-Legacy legacy_pass_generator.py
 ```
 
-Если ресурсы существуют рядом с проектом, они будут включены в один пакет и будут доступны внутри EXE. При отсутствии ресурсов приложение продолжает работать в упрощённом режиме, но внешний вид будет базовым.
+CI добавляет `assets/`, `fonts/`/`fronts/` и icon через `--add-data`.
+`installer/GET-Passes.iss` версии **2.0.0** устанавливает оба EXE, но Start Menu
+и desktop shortcut указывают только на `GET-Passes.exe`.
 
-## Возможности
+### GitHub Actions
 
-**Пропуск на ТС**
+- `python-app.yml` — Python 3.13/3.14, flake8/C901, full pytest + coverage,
+  dependency audit, Bandit;
+- `security.yml` — gitleaks и CodeQL;
+- `windows-ci.yml` — tests, source smoke обоих launchers, сборка/self-test обоих
+  EXE, Inno Setup, install/self-test обоих установленных EXE и uninstall;
+- `build-exe.yml` — main candidate build, portable ZIP и installer, с приоритетом
+  Artifact Signing → Azure Key Vault → PFX;
+- `release.yml` — только tag `v*`, версия tag должна совпасть с `pyproject.toml`,
+  а trusted signing обязателен.
 
-- Карточная форма с автодополнением марки машины по базе, автозаполнением
-  данных по госномеру, проверкой дублей и подсветкой обязательных полей
-  в реальном времени
-- Печать на лист А4 (два пропуска, сверху/снизу, с линией разреза) или А5
-- **Двусторонняя печать**: на обороте — фиксированный текст правил
-  пользования пропуском (по флажку «Печатать оборот»). Кегль текста
-  подбирается автоматически под объём. Принтер с автоматическим дуплексом
-  печатает обе стороны одним заданием; принтер без дуплекса — печатает
-  лицевую сторону, дожидается подтверждения (переложить лист в лоток)
-  и печатает оборот отдельным заданием. При сохранении в PDF с включённым
-  флажком получается двухстраничный файл
+Portable ZIP содержит `GET-Passes.exe` и `GET-Passes-Legacy.exe` вместе с
+ресурсами. Stable release `v2.0.0` запрещён до выполнения
+`docs/PHYSICAL_ACCEPTANCE_2_0.md`.
 
-**Пропуск работника (бейдж)**
+## Основные возможности
 
-- Кадрирование фотографии с масштабированием и перемещением; овальная
-  направляющая поверх кадра подсказывает типовую компоновку паспортного
-  фото (без распознавания лица — просто визуальный ориентир)
-- Автодополнение должности по уже выданным бейджам
-- Фото сохраняется в самом журнале (ссылкой на файл), поэтому бейдж можно
-  переиздать без повторной загрузки и обрезки снимка
+### Пропуск ТС
 
-**Журналы и реестры**
+- два пропуска на A4 или один на A5;
+- автоподстановка сохранённых данных автомобиля без восстановления старых ФИО
+  водителя/телефона/зоны;
+- live preview существующим renderer;
+- односторонняя, автоматическая duplex и manual-flip печать;
+- PDF и durable `prepare → output → confirm`.
 
-- Хранилище — SQLite (`gup.sqlite3` в каталоге данных), а не пара
-  CSV+XLSX: запись атомарна, файл журнала не блокируется, если кто-то
-  открыл старую выгрузку в Excel
-- Фильтры: текстовый поиск, статус, диапазон дат выдачи, зона допуска,
-  подразделение, должность, водитель; сортировка по клику на заголовок
-  колонки. Статус-колонка показывает вычисленное состояние («просрочен»,
-  «нет срока»), а не только сырое значение из базы
-- Кнопка «Открыть в Excel» каждый раз пересобирает актуальный XLSX-снимок
-  журнала из текущих данных
-- Аннулирование вместо удаления (история сохраняется), массовая печать
-  из Excel/CSV, печатные реестры
+### Пропуск работника
 
-**Общее**
+- кадрирование фото с общей core-геометрией;
+- предупреждения дубликатов и blacklist;
+- `card`, `a4_grid`, `a4_single`;
+- PDF/печать и durable issuance.
 
-- Тёмная/светлая тема, переключается кнопкой в верхней панели
-- Окно запоминает размер, выбранную вкладку и ширину панелей между
-  запусками
-- Резервное копирование и восстановление: защищённый `.gupbak` с паролем
-  или обычный ZIP **без шифрования**; оба формата могут содержать персональные
-  данные, поэтому архивы необходимо хранить на носителе с ограниченным доступом
+### Журналы и recovery
 
-## Дизайн-система
+- SQLite вместо runtime CSV/XLSX хранения;
+- поиск, status/date/context filters, sorting, pagination;
+- optimistic edit/history/revoke;
+- XLSX snapshot текущей страницы;
+- recovery prepared операций после ошибки/прерывания внешнего вывода.
 
-Базовые GET-токены вынесены в presentation-neutral `getpass_design/tokens.py`.
-`getpass_ui/tokens.py` сохраняет совместимость Tkinter-кода через re-export,
-`getpass_ui/theme.py` строит ttk-стили, а `getpass_qt/theme/stylesheet.py`
-формирует QSS для PySide6. Палитра остаётся брендовой:
-тёмно-синий/тил/красный/жёлтый, с общими отступами, типографикой и радиусами.
+### Batch
 
-`getpass_ui/components.py` собирает готовые Tkinter-элементы форм (`Field`,
-`AutocompleteEntry`). PySide6 интерфейс использует те же семантические токены,
-не вводя отдельную независимую палитру.
+- CSV `;`, UTF-8-SIG и CP1251 fallback;
+- отдельные vehicle/badge templates;
+- validation preview перед output;
+- два ТС на A4 и 3×3 badge grid;
+- progress/cancel и recoverable confirm failure.
 
-## Файлы рядом с программой
+### Backup и диагностика
 
-| Файл | Назначение |
-| --- | --- |
-| `assets/logo_get.png` | фирменный знак ГЭТ. Единственный растровый элемент интерфейса и бланков; необязателен — без него подпись «ГЭТ» рисуется текстом |
-| `app_icon.ico` | иконка окна |
-| `fonts/` | брендбук-шрифт (`Moscow Sans` или `Echoes Sans`) и `DoT Icons` (пиктограммы трамвая/троллейбуса в печатных реестрах). Каталог может называться и `fronts/`. Необязательны |
+- encrypted `.gupbak` и обычный ZIP;
+- checksum + SQLite integrity validation;
+- rollback при неуспешном restore;
+- диагностика Python/paths/database size/integrity/recent backups.
 
-Бланк пропуска на ТС и бейджа **строится кодом** (`getpass_core/blank.py`,
-`getpass_core/render.py`) — внешний `template.png` не используется вовсе.
-Разметка снята с типографского бланка и задана координатами; чтобы
-поправить макет, правьте константы блоков в этих модулях, а не картинку.
+## Дизайн и архитектура
 
-## Где хранятся данные
+- `getpass_core/` — domain/storage/render/printing/backup, без Qt/Tk зависимости;
+- `getpass_app/` — UI-независимый application boundary;
+- `getpass_design/` — presentation-neutral design tokens;
+- `getpass_qt/` — production PySide6 UI candidate, MVVM-lite/model-view;
+- `getpass_ui/` — временный Tkinter rollback до завершения Phase 6;
+- `pass_generator.py` — production PySide6 launcher;
+- `legacy_pass_generator.py` — временный rollback launcher.
 
-Каталог выбирается автоматически при запуске:
-
-1. `data/` рядом с программой — если туда можно писать;
-2. каталог программы — если там уже лежат журналы прежней версии;
-3. `%LOCALAPPDATA%\GET-Passes` — если запись рядом с программой запрещена
-   (например, установка в `Program Files`); файлы прежней версии переносятся.
-
-В каталоге данных: `settings.json`, `gup.sqlite3` (журналы пропусков ТС
-и бейджей), база машин, `photos/` с фотографиями бейджей, `crash.log`.
-Журналы прежних версий (`.csv`/`.xlsx`) переносятся в SQLite один раз при
-первом обращении и больше не перечитываются; сами файлы не трогаются и
-остаются как есть.
-
-> **Персональные данные.** Журналы и фотографии содержат ФИО, телефоны,
-> госномера и изображения сотрудников. При первом запуске программа
-> ограничивает доступ к каталогу данных текущим пользователем. Резервная
-> копия ZIP — обычный архив **без шифрования**; `.gupbak` шифруется указанным
-> пользователем паролем. Храните резервные копии на носителе с ограниченным
-> доступом.
-
-## Структура
-
-```
-pass_generator.py     production-точка входа Tkinter
-getpass_core/         предметная логика, без Tkinter/PySide6
-  domain.py             даты, номера бланков, госномера
-  config.py             пути, каталог данных, настройки, вычистка ПДн из crash.log
-  storage.py            журналы на SQLite (единая реализация для ТС и бейджей), база машин
-  crop.py               геометрия кадрирования фотографии
-  dpi.py                DPI-осведомлённость, масштаб под монитор
-  fonts.py              шрифты бланков, Echoes Sans, DoT Icons
-  blank.py              бланк пропуска ТС, отрисованный кодом
-  render.py             отрисовка пропуска (лицо + оборот), бейджа, листов А4
-  registry.py           печатные реестры (единая реализация)
-  pdfwriter.py          потоковая запись многостраничного PDF
-  printing.py           печать через Windows (в т.ч. двусторонняя), сохранение документов
-  backup.py             резервное копирование и восстановление
-getpass_design/       presentation-neutral GET design tokens
-getpass_app/          UI-независимый application boundary для Qt workflow
-getpass_ui/           production-интерфейс Tkinter
-  tokens.py             compatibility re-export GET-токенов
-  theme.py              движок оформления: стили ttk, Card, светлая/тёмная тема
-  components.py         готовые элементы форм (`Field`, `AutocompleteEntry`)
-  app.py                главное окно
-  pass_tab.py           форма пропуска на ТС
-  badge_tab.py          форма бейджа
-  journal.py            окно журнала (одно на оба журнала, с фильтрами)
-  crop_window.py        кадрирование фотографии, овальная направляющая
-  batch.py              массовая печать
-  widgets.py            общие элементы (прокрутка, диалог прогресса)
-getpass_qt/           PySide6 Phase-4 preview: все 9 shell workflow + settings/blacklist
-tests/                автотесты
-```
-
-## Мониторы с высоким разрешением
-
-Приложение объявляет себя DPI-осведомлённым (Per-Monitor v2), поэтому при
-масштабе Windows 125/150/200% интерфейс становится крупнее, а не мыльнее.
-Размеры окон пересчитываются под масштаб и ужимаются под рабочую область
-экрана, чтобы нижние панели с кнопками не уходили под панель задач.
+PySide6 и Tkinter используют одни и те же core storage/render/printing contracts.
 
 ## Тесты
 
-```
+```bash
 pip install -r requirements-dev.txt
-python -m pytest                    # логика, хранилище, renderer, Tkinter и PySide6 preview
-xvfb-run -a python -m pytest        # + headless-проверка интерфейсов (Linux/CI)
-python -m getpass_qt --self-test    # smoke: все реальные Phase-4 маршруты, включая settings
+python -m pytest
+xvfb-run -a python -m pytest
 python pass_generator.py --self-test
+python legacy_pass_generator.py --self-test
 ```
 
-CI дополнительно запускает strict flake8/C901 для `getpass_core`, `getpass_ui`,
-`getpass_app`, `getpass_design`, `getpass_qt`, `tests` и `tools`, dependency
-audit и Bandit. Windows PR smoke проверяет обе точки входа, отдельный Qt preview
-EXE и прежний production installer.
+Windows CI дополнительно проверяет оба собранных EXE и оба EXE после установки
+Setup.exe.
 
-## Автоматическая сборка в GitHub Actions
+## DPI и доступность
 
-Файл [`.github/workflows/build-exe.yml`](.github/workflows/build-exe.yml) собирает релизный архив на Windows при каждом push в `main` и может быть запущен вручную через Actions.
+Qt production candidate должен пройти физическую проверку Windows scaling
+100/125/150/200%. Основные формы поддерживают клавиатурную навигацию,
+семантические состояния ошибок и светлую/тёмную тему. CI проверяет headless
+поведение, но не заменяет визуальную проверку на целевом мониторе.
 
-Что делается автоматически:
+## Production cutover gate
 
-- устанавливается Python 3.14.7;
-- ставятся зависимости из [requirements.txt](requirements.txt);
-- устанавливается `pyinstaller`;
-- собирается единый `.exe` через `pyinstaller --onefile --windowed`;
-- копируются `app_icon.ico`, `assets/` и шрифты (`fonts/` или `fronts/`);
-- создаётся zip-архив `GET-Passes-windows.zip`;
-- архив выкладывается как артефакт и обновляет релиз `latest-build`.
+Software candidate может считаться готовым только после зелёных Python,
+Security и Windows workflows. Фактический production cutover и стабильный
+`v2.0.0` дополнительно требуют:
 
-Для локального релизного выпуска достаточно запускать ту же команду на Windows-машине и упаковать полученный `GET-Passes.exe` вместе с ресурсами.
+1. trusted Authenticode signing;
+2. выполнения `docs/PHYSICAL_ACCEPTANCE_2_0.md` на реальном ПК/принтере;
+3. подтверждения rollback `GET-Passes-Legacy.exe`;
+4. фиксации решения `ACCEPTED` в issue #41.
 
-> `template.png` не требуется: бланки рисуются программой напрямую.
-
-## Доступность
-
-Основные поля доступны через Tab/Shift+Tab, обязательные поля отмечаются
-звёздочкой и текстовой ошибкой, а автодополнение управляется стрелками, Enter
-и Escape. Интерфейс сохраняет читаемые размеры при масштабе Windows 125–200%.
-
-## Статус миграции на PySide6
-
-Phase 4 code migration завершена: все девять маршрутов shell теперь имеют
-реальные PySide6 workflow. ТС, работники, массовая печать, журналы,
-незавершённые операции, backup/restore, диагностика и настройки работают поверх
-существующих core/storage/render/backup механизмов через UI-независимый
-application layer, MVVM-lite, Qt model/view и `QThreadPool` там, где операции
-могут быть длительными. Раздел «Настройки» сохраняет операторские defaults для
-новых workflow и управляет существующим blacklist через model/view без изменения
-формата `blacklist.json`.
-
-Это всё ещё **не production cutover**: `pass_generator.py`, production
-PyInstaller/Inno и release pipeline остаются на Tkinter. Следующий этап —
-Phase 5: переключение production entry point на PySide6 только после финальной
-CI/Windows-проверки и физической приёмки на рабочем месте и реальном принтере.
+До этого PR production-cutover должен оставаться неперелитым в `main`, а tag
+`v2.0.0` не создаётся.

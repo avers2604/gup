@@ -14,13 +14,16 @@ jobs:
     runs-on: windows-latest
     env:
       RELEASE_TAG: ${{ github.ref_name }}
+      ARTIFACT_SIGNING_PROFILE: TM5-CodeSign
+      HAS_TM5_PRIVATE_SIGNING_SECRETS: >-
+        ${{ secrets.TM5_SIGN_CERT_BASE64 != '' &&
+            secrets.TM5_SIGN_CERT_PASSWORD != '' }}
       HAS_ARTIFACT_SIGNING_SECRETS: >-
         ${{ secrets.AZURE_CLIENT_ID != '' &&
             secrets.AZURE_TENANT_ID != '' &&
             secrets.AZURE_SUBSCRIPTION_ID != '' &&
             secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT != '' &&
-            secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME != '' &&
-            secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE != '' }}
+            secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME != '' }}
       HAS_AZURE_SIGNING_SECRETS: >-
         ${{ secrets.AZURE_CLIENT_ID != '' &&
             secrets.AZURE_TENANT_ID != '' &&
@@ -47,15 +50,13 @@ jobs:
           if (-not $match) { throw 'Project version not found in pyproject.toml' }
           $version = $match.Matches[0].Groups[1].Value
           $expectedTag = "v$version"
-          if ($env:RELEASE_TAG -ne $expectedTag) {
-            throw "Tag $env:RELEASE_TAG does not match project version $expectedTag"
-          }
+          if ($env:RELEASE_TAG -ne $expectedTag) { throw "Tag $env:RELEASE_TAG does not match project version $expectedTag" }
 
       - name: Require trusted signing for stable release
         shell: pwsh
         run: |
-          if ('${{ env.HAS_ARTIFACT_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_AZURE_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_WINDOWS_SIGNING_SECRETS }}' -ne 'true') {
-            throw 'Stable release requires trusted Authenticode signing secrets. See docs/SIGNING.md.'
+          if ('${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_ARTIFACT_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_AZURE_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_WINDOWS_SIGNING_SECRETS }}' -ne 'true') {
+            throw 'Stable release requires Authenticode signing secrets. See docs/SIGNING.md.'
           }
 
       - name: Install build dependencies
@@ -69,48 +70,86 @@ jobs:
       - name: Run full Windows tests
         run: python -m pytest
 
-      - name: Build application EXE
+      - name: Self-test source launchers
+        run: |
+          python pass_generator.py --self-test
+          python legacy_pass_generator.py --self-test
+
+      - name: Build production and rollback EXE
         shell: pwsh
         run: |
-          $args = @(
-            '--noconfirm', '--clean', '--onefile', '--windowed',
-            '--icon', 'app_icon.ico', '--name', 'GET-Passes'
-          )
-          if (Test-Path 'assets') { $args += @('--add-data', 'assets;assets') }
-          if (Test-Path 'fonts') { $args += @('--add-data', 'fonts;fonts') }
-          if (Test-Path 'fronts') { $args += @('--add-data', 'fronts;fronts') }
-          if (Test-Path 'app_icon.ico') { $args += @('--add-data', 'app_icon.ico;.') }
-          python -m PyInstaller @args 'pass_generator.py'
+          function Build-GetPassesExe($name, $script) {
+            $args = @('--noconfirm','--clean','--onefile','--windowed','--icon','app_icon.ico','--name',$name)
+            if (Test-Path 'assets') { $args += @('--add-data', 'assets;assets') }
+            if (Test-Path 'fonts') { $args += @('--add-data', 'fonts;fonts') }
+            if (Test-Path 'fronts') { $args += @('--add-data', 'fronts;fronts') }
+            if (Test-Path 'app_icon.ico') { $args += @('--add-data', 'app_icon.ico;.') }
+            python -m PyInstaller @args $script
+            if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed for $name" }
+          }
+          Build-GetPassesExe 'GET-Passes' 'pass_generator.py'
+          Build-GetPassesExe 'GET-Passes-Legacy' 'legacy_pass_generator.py'
 
       - name: Self-test packaged EXE before signing
         shell: pwsh
         run: |
-          $check = Start-Process -FilePath 'dist\GET-Passes.exe' -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
-          if (-not $check.WaitForExit(60000)) { $check.Kill(); throw 'Smoke test timed out' }
-          if ($check.ExitCode -ne 0) { throw 'Smoke test failed' }
+          foreach ($exe in @('dist\GET-Passes.exe','dist\GET-Passes-Legacy.exe')) {
+            $check = Start-Process -FilePath $exe -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
+            if (-not $check.WaitForExit(60000)) { $check.Kill(); throw "Smoke test timed out: $exe" }
+            if ($check.ExitCode -ne 0) { throw "Smoke test failed: $exe" }
+          }
+
+      - name: Sign EXE with TM5 Private PKI
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS == 'true' }}
+        shell: pwsh
+        env:
+          TM5_SIGN_CERT_BASE64: ${{ secrets.TM5_SIGN_CERT_BASE64 }}
+          TM5_SIGN_CERT_PASSWORD: ${{ secrets.TM5_SIGN_CERT_PASSWORD }}
+        run: |
+          Import-Certificate -FilePath 'certs\TM5-Root-CA.cer' -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'tm5-codesign.pfx'
+          [System.IO.File]::WriteAllBytes($pfxPath, [System.Convert]::FromBase64String($env:TM5_SIGN_CERT_BASE64))
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found' }
+          foreach ($exe in @('dist\GET-Passes.exe','dist\GET-Passes-Legacy.exe')) {
+            & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:TM5_SIGN_CERT_PASSWORD" /v $exe
+            if ($LASTEXITCODE -ne 0) { throw "TM5 EXE signing failed: $exe" }
+          }
 
       - name: Azure login
-        if: ${{ env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' || env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && (env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' || env.HAS_AZURE_SIGNING_SECRETS == 'true') }}
         uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac # v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Sign EXE with Azure Artifact Signing
-        if: ${{ env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}
+      - name: Sign production EXE with Azure Artifact Signing
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
           signing-account-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
+          certificate-profile-name: ${{ env.ARTIFACT_SIGNING_PROFILE }}
           files: ${{ github.workspace }}\dist\GET-Passes.exe
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
+      - name: Sign rollback EXE with Azure Artifact Signing
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ env.ARTIFACT_SIGNING_PROFILE }}
+          files: ${{ github.workspace }}\dist\GET-Passes-Legacy.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
       - name: Sign EXE with Azure Key Vault certificate
-        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' }}
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && env.HAS_AZURE_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
           AZURE_KEY_VAULT_NAME: ${{ secrets.AZURE_KEY_VAULT_NAME }}
@@ -119,14 +158,15 @@ jobs:
         run: |
           $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
           az keyvault secret download --vault-name "$env:AZURE_KEY_VAULT_NAME" --name "$env:AZURE_SIGN_CERT_NAME" --file "$pfxPath" --encoding base64
-          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
-            Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $signtool) { throw 'signtool.exe not found' }
-          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:AZURE_SIGN_CERT_PASSWORD" /v 'dist\GET-Passes.exe'
-          if ($LASTEXITCODE -ne 0) { throw 'EXE signing failed' }
+          foreach ($exe in @('dist\GET-Passes.exe','dist\GET-Passes-Legacy.exe')) {
+            & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:AZURE_SIGN_CERT_PASSWORD" /v $exe
+            if ($LASTEXITCODE -ne 0) { throw "EXE signing failed: $exe" }
+          }
 
       - name: Sign EXE with PFX certificate
-        if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
           WINDOWS_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_SIGN_CERT_BASE64 }}
@@ -134,17 +174,20 @@ jobs:
         run: |
           $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
           [System.IO.File]::WriteAllBytes($pfxPath, [System.Convert]::FromBase64String($env:WINDOWS_SIGN_CERT_BASE64))
-          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
-            Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $signtool) { throw 'signtool.exe not found' }
-          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:WINDOWS_SIGN_CERT_PASSWORD" /v 'dist\GET-Passes.exe'
-          if ($LASTEXITCODE -ne 0) { throw 'EXE signing failed' }
+          foreach ($exe in @('dist\GET-Passes.exe','dist\GET-Passes-Legacy.exe')) {
+            & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:WINDOWS_SIGN_CERT_PASSWORD" /v $exe
+            if ($LASTEXITCODE -ne 0) { throw "EXE signing failed: $exe" }
+          }
 
       - name: Verify signed application EXE
         shell: pwsh
         run: |
-          $signature = Get-AuthenticodeSignature 'dist\GET-Passes.exe'
-          if ($signature.Status -ne 'Valid') { throw "Invalid EXE signature: $($signature.Status)" }
+          $productionSignature = Get-AuthenticodeSignature 'dist\GET-Passes.exe'
+          if ($productionSignature.Status -ne 'Valid') { throw "Invalid production EXE signature: $($productionSignature.Status)" }
+          $legacySignature = Get-AuthenticodeSignature 'dist\GET-Passes-Legacy.exe'
+          if ($legacySignature.Status -ne 'Valid') { throw "Invalid rollback EXE signature: $($legacySignature.Status)" }
 
       - name: Build Inno Setup installer
         shell: pwsh
@@ -155,40 +198,50 @@ jobs:
           & $isccPath 'installer\GET-Passes.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Inno Setup build failed' }
 
+      - name: Sign installer with TM5 Private PKI
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS == 'true' }}
+        shell: pwsh
+        env:
+          TM5_SIGN_CERT_PASSWORD: ${{ secrets.TM5_SIGN_CERT_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'tm5-codesign.pfx'
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found' }
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:TM5_SIGN_CERT_PASSWORD" /v 'dist\installer\GET-Passes-Setup.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'TM5 installer signing failed' }
+
       - name: Sign installer with Azure Artifact Signing
-        if: ${{ env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
           signing-account-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
+          certificate-profile-name: ${{ env.ARTIFACT_SIGNING_PROFILE }}
           files: ${{ github.workspace }}\dist\installer\GET-Passes-Setup.exe
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
       - name: Sign installer with Azure Key Vault certificate
-        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' }}
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && env.HAS_AZURE_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
           AZURE_SIGN_CERT_PASSWORD: ${{ secrets.AZURE_SIGN_CERT_PASSWORD }}
         run: |
           $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
-          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
-            Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $signtool) { throw 'signtool.exe not found' }
           & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:AZURE_SIGN_CERT_PASSWORD" /v 'dist\installer\GET-Passes-Setup.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Installer signing failed' }
 
       - name: Sign installer with PFX certificate
-        if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
           WINDOWS_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
         run: |
           $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
-          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
-            Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $signtool) { throw 'signtool.exe not found' }
           & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:WINDOWS_SIGN_CERT_PASSWORD" /v 'dist\installer\GET-Passes-Setup.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Installer signing failed' }
@@ -207,9 +260,13 @@ jobs:
           $install = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/DIR=$installDir") -PassThru -Wait
           if ($install.ExitCode -ne 0) { throw "Installer failed: $($install.ExitCode)" }
           $installedExe = Join-Path $installDir 'GET-Passes.exe'
-          $check = Start-Process -FilePath $installedExe -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
-          if (-not $check.WaitForExit(60000)) { $check.Kill(); throw 'Installed self-test timed out' }
-          if ($check.ExitCode -ne 0) { throw 'Installed self-test failed' }
+          $installedLegacy = Join-Path $installDir 'GET-Passes-Legacy.exe'
+          foreach ($exe in @($installedExe,$installedLegacy)) {
+            if (-not (Test-Path $exe)) { throw "Installed EXE not found: $exe" }
+            $check = Start-Process -FilePath $exe -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
+            if (-not $check.WaitForExit(60000)) { $check.Kill(); throw "Installed self-test timed out: $exe" }
+            if ($check.ExitCode -ne 0) { throw "Installed self-test failed: $exe" }
+          }
           $uninstaller = Join-Path $installDir 'unins000.exe'
           $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -PassThru -Wait
           if ($uninstall.ExitCode -ne 0) { throw 'Uninstall failed' }
@@ -220,6 +277,7 @@ jobs:
           $out = 'dist\GET-Passes'
           New-Item -ItemType Directory -Path $out -Force | Out-Null
           Copy-Item 'dist\GET-Passes.exe' $out\
+          Copy-Item 'dist\GET-Passes-Legacy.exe' $out\
           Copy-Item 'app_icon.ico' $out\
           if (Test-Path assets) { Copy-Item assets $out\assets -Recurse }
           if (Test-Path fonts) { Copy-Item fonts $out\fonts -Recurse }
@@ -227,10 +285,7 @@ jobs:
           7z a -tzip -mx=9 GET-Passes-windows.zip "$out\*"
           $zipHash = (Get-FileHash 'GET-Passes-windows.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
           $setupHash = (Get-FileHash 'dist\installer\GET-Passes-Setup.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
-          @(
-            "$zipHash  GET-Passes-windows.zip",
-            "$setupHash  GET-Passes-Setup.exe"
-          ) | Set-Content 'SHA256SUMS.txt' -Encoding ascii
+          @("$zipHash  GET-Passes-windows.zip", "$setupHash  GET-Passes-Setup.exe") | Set-Content 'SHA256SUMS.txt' -Encoding ascii
 
       - name: Publish stable release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3

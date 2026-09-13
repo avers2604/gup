@@ -1,5 +1,5 @@
 #define MyAppName "GET-Passes"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "2.0.0"
 #define MyAppPublisher "СПб ГУП «Горэлектротранс»"
 #define MyAppURL "https://github.com/avers2604/gup"
 #define MyAppExeName "GET-Passes.exe"
@@ -30,7 +30,7 @@ WizardStyle=modern
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
-VersionInfoVersion=1.1.0.0
+VersionInfoVersion=2.0.0.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=Система выпуска пропусков
 VersionInfoProductName={#MyAppName}
@@ -44,6 +44,7 @@ Name: "desktopicon"; Description: "Создать ярлык на рабочем
 
 [Files]
 Source: "..\dist\GET-Passes.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\GET-Passes-Legacy.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\GET-Passes"; Filename: "{app}\GET-Passes.exe"; WorkingDir: "{app}"
