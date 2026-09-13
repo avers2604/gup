@@ -11,11 +11,13 @@ from PySide6.QtWidgets import (
 from getpass_qt.theme.manager import ThemeManager
 from getpass_qt.viewmodels.backups_viewmodel import BackupsViewModel
 from getpass_qt.viewmodels.batch_viewmodel import BatchViewModel
+from getpass_qt.viewmodels.blacklist_viewmodel import BlacklistViewModel
 from getpass_qt.viewmodels.diagnostics_viewmodel import DiagnosticsViewModel
 from getpass_qt.viewmodels.employee_badge_viewmodel import EmployeeBadgeViewModel
 from getpass_qt.viewmodels.journal_viewmodel import JournalViewModel
 from getpass_qt.viewmodels.main_viewmodel import ROUTES, MainViewModel
 from getpass_qt.viewmodels.operations_viewmodel import OperationsViewModel
+from getpass_qt.viewmodels.settings_viewmodel import SettingsViewModel
 from getpass_qt.viewmodels.vehicle_pass_viewmodel import VehiclePassViewModel
 from getpass_qt.views.backups import BackupsPage
 from getpass_qt.views.batch import BatchPage
@@ -25,6 +27,7 @@ from getpass_qt.views.employee_badge import EmployeeBadgePage
 from getpass_qt.views.journals import JournalsPage
 from getpass_qt.views.migration_page import MigrationPage
 from getpass_qt.views.operations import OperationsPage
+from getpass_qt.views.settings import SettingsPage
 from getpass_qt.views.vehicle_pass import VehiclePassPage
 from getpass_qt.widgets.sidebar import ROUTE_LABELS, Sidebar
 
@@ -37,6 +40,7 @@ _REAL_ROUTES = frozenset({
     "operations",
     "backups",
     "diagnostics",
+    "settings",
 })
 _MIGRATION_DESCRIPTIONS = {
     route: (
@@ -125,6 +129,12 @@ class MainWindow(QMainWindow):
         self.diagnostics_page = DiagnosticsPage(diagnostics_viewmodel)
         self._add_page("diagnostics", self.diagnostics_page)
 
+        self.settings_placeholder = MigrationPage(
+            ROUTE_LABELS["settings"],
+            "Раздел настроек подключается через application boundary.",
+        )
+        self._add_page("settings", self.settings_placeholder)
+
         for route in ROUTES[1:]:
             if route in _REAL_ROUTES:
                 continue
@@ -153,6 +163,24 @@ class MainWindow(QMainWindow):
     @property
     def active_route(self) -> str:
         return self._viewmodel.active_route
+
+    def install_settings_page(
+        self,
+        settings_viewmodel: SettingsViewModel,
+        blacklist_viewmodel: BlacklistViewModel,
+    ) -> SettingsPage:
+        index = self._page_indexes["settings"]
+        previous = self.stack.widget(index)
+        self.stack.removeWidget(previous)
+        previous.deleteLater()
+
+        page = SettingsPage(settings_viewmodel, blacklist_viewmodel)
+        new_index = self.stack.insertWidget(index, page)
+        self._page_indexes["settings"] = new_index
+        self.settings_page = page
+        if self.active_route == "settings":
+            self.stack.setCurrentIndex(new_index)
+        return page
 
     def _add_page(self, route: str, page: QWidget) -> None:
         self._page_indexes[route] = self.stack.addWidget(page)

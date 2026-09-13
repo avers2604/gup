@@ -4,7 +4,9 @@ from dataclasses import replace
 
 from PySide6.QtCore import QObject, Signal
 
+from getpass_app.models.preferences import OperatorDefaults
 from getpass_app.models.vehicle_pass import (
+    VehiclePassCommon,
     VehiclePassData,
     VehiclePassState,
     validate_vehicle_state,
@@ -32,10 +34,34 @@ class VehiclePassViewModel(QObject):
     operation_succeeded = Signal(str)
     operation_failed = Signal(str)
 
-    def __init__(self, service: VehiclePassService, parent=None) -> None:
+    def __init__(
+        self,
+        service: VehiclePassService,
+        *,
+        defaults: OperatorDefaults | None = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self._service = service
-        self._state = VehiclePassState()
+        defaults = defaults or OperatorDefaults()
+        self.preview_target = (
+            "second" if defaults.auto_preview_target == "2" else "first"
+        )
+        self._state = VehiclePassState(
+            first=VehiclePassData(
+                num=defaults.last_pass_num,
+                territory=defaults.territory,
+            ),
+            second=VehiclePassData(territory=defaults.territory),
+            common=VehiclePassCommon(
+                valid_until=defaults.valid_until,
+                is_temporary=defaults.is_temporary_car,
+                otb_post=defaults.otb_post,
+                otb_name=defaults.otb_name,
+            ),
+            page_format=defaults.print_mode,
+            print_back=defaults.print_pass_back,
+        )
 
     @property
     def state(self) -> VehiclePassState:
@@ -111,7 +137,8 @@ class VehiclePassViewModel(QObject):
         self.state_changed.emit(self._state)
         return True
 
-    def refresh_preview(self, slot: str = "first"):
+    def refresh_preview(self, slot: str | None = None):
+        slot = slot or self.preview_target
         if slot not in ("first", "second"):
             raise ValueError(f"Unknown pass slot: {slot}")
         image = self._service.render_preview(

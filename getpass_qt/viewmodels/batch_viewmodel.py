@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QThreadPool, Signal
 
+from getpass_app.models.preferences import OperatorDefaults
 from getpass_app.services.batch_service import BatchCancelled
 from getpass_qt.workers.task_worker import TaskWorker
 
@@ -16,7 +17,14 @@ class BatchViewModel(QObject):
     output_succeeded = Signal(object)
     operation_failed = Signal(str)
 
-    def __init__(self, service, *, pool=None, parent=None) -> None:
+    def __init__(
+        self,
+        service,
+        *,
+        defaults: OperatorDefaults | None = None,
+        pool=None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self._service = service
         self._pool = pool or QThreadPool.globalInstance()
@@ -26,15 +34,16 @@ class BatchViewModel(QObject):
         self._review = None
         self._busy = False
         self._worker = None
+        defaults = defaults or OperatorDefaults()
         self._pass_defaults = {
             "issue_date": "",
-            "valid_until": "",
-            "otb_post": "",
-            "otb_name": "",
-            "is_temporary": False,
+            "valid_until": defaults.valid_until,
+            "otb_post": defaults.otb_post,
+            "otb_name": defaults.otb_name,
+            "is_temporary": defaults.is_temporary_car,
         }
         self._badge_defaults = {
-            "park": "",
+            "park": defaults.badge_park,
             "issue_date": "",
             "valid_until": "",
         }
