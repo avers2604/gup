@@ -76,6 +76,7 @@ class VehiclePassPage(QWidget):
 
         self._connect_viewmodel()
         self._sync_state(self._viewmodel.state)
+        self._sync_preview_target()
         self._refresh_current_preview()
 
     def _build_form_panel(self) -> QWidget:
@@ -275,6 +276,14 @@ class VehiclePassPage(QWidget):
         self.slot_tabs.setTabEnabled(1, second_enabled)
         if not second_enabled and self.slot_tabs.currentIndex() == 1:
             self.slot_tabs.setCurrentIndex(0)
+
+    def _sync_preview_target(self) -> None:
+        index = self.preview_target.findData(self._viewmodel.preview_target)
+        if index < 0 or index == self.preview_target.currentIndex():
+            return
+        old = self.preview_target.blockSignals(True)
+        self.preview_target.setCurrentIndex(index)
+        self.preview_target.blockSignals(old)
 
     def _show_validation(self, issues) -> None:
         for fields in self.pass_fields.values():
