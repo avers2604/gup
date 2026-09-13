@@ -15,7 +15,8 @@ def test_tm5_private_pki_assets_and_scripts_exist():
 
     create_script = (ROOT / "tools" / "create_tm5_private_pki.ps1").read_text(encoding="utf-8")
     assert 'CN=TM5 Root CA' in create_script
-    assert 'CN=TM5 Code Signing' in create_script
+    assert 'CN=TM5' in create_script
+    assert 'TM5 Code Signing' in create_script
     assert '1.3.6.1.5.5.7.3.3' in create_script
     assert 'Export-PfxCertificate' in create_script
     assert 'Export-Certificate' in create_script
