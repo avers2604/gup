@@ -24,15 +24,21 @@ def test_windows_pr_smoke_builds_and_self_tests_production_and_rollback():
     assert "permissions:\n  contents: read" in workflow
 
 
-def test_release_signing_prefers_managed_artifact_signing_then_pfx_fallbacks():
+def test_release_signing_prefers_tm5_private_then_managed_and_pfx_fallbacks():
     workflow = _workflow("build-exe.yml")
-    assert "if: ${{ env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}" in workflow
+    assert "if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS == 'true' }}" in workflow
     assert (
-        "if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' && "
+        "if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && "
+        "env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}"
+    ) in workflow
+    assert (
+        "if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && "
+        "env.HAS_AZURE_SIGNING_SECRETS == 'true' && "
         "env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' }}"
     ) in workflow
     assert (
-        "if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && "
+        "if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && "
+        "env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && "
         "env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' && "
         "env.HAS_AZURE_SIGNING_SECRETS != 'true' }}"
     ) in workflow
