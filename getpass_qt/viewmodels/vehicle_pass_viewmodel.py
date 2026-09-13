@@ -44,6 +44,9 @@ class VehiclePassViewModel(QObject):
         super().__init__(parent)
         self._service = service
         defaults = defaults or OperatorDefaults()
+        self.preview_target = (
+            "second" if defaults.auto_preview_target == "2" else "first"
+        )
         self._state = VehiclePassState(
             first=VehiclePassData(
                 num=defaults.last_pass_num,
@@ -134,7 +137,8 @@ class VehiclePassViewModel(QObject):
         self.state_changed.emit(self._state)
         return True
 
-    def refresh_preview(self, slot: str = "first"):
+    def refresh_preview(self, slot: str | None = None):
+        slot = slot or self.preview_target
         if slot not in ("first", "second"):
             raise ValueError(f"Unknown pass slot: {slot}")
         image = self._service.render_preview(
