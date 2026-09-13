@@ -122,13 +122,14 @@ def test_otb_signature_captions_are_close_to_the_line(monkeypatch):
 
 
 def test_release_workflows_support_azure_artifact_signing():
-    """Доверенная Azure-подпись должна идти через Artifact Signing, а не только через PFX."""
+    """Доверенная Azure-подпись использует закреплённый Public Trust profile TM5."""
     for name in ("build-exe.yml", "release.yml"):
         workflow = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
         assert "HAS_ARTIFACT_SIGNING_SECRETS" in workflow
         assert "azure/artifact-signing-action@" in workflow
         assert "AZURE_ARTIFACT_SIGNING_ENDPOINT" in workflow
         assert "AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME" in workflow
-        assert "AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE" in workflow
+        assert "ARTIFACT_SIGNING_PROFILE: TM5" in workflow
+        assert "AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE" not in workflow
         assert "signing-account-name:" in workflow
-        assert "certificate-profile-name:" in workflow
+        assert "certificate-profile-name: ${{ env.ARTIFACT_SIGNING_PROFILE }}" in workflow
