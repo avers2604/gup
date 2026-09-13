@@ -11,11 +11,13 @@ from PySide6.QtWidgets import (
 from getpass_qt.theme.manager import ThemeManager
 from getpass_qt.viewmodels.backups_viewmodel import BackupsViewModel
 from getpass_qt.viewmodels.batch_viewmodel import BatchViewModel
+from getpass_qt.viewmodels.blacklist_viewmodel import BlacklistViewModel
 from getpass_qt.viewmodels.diagnostics_viewmodel import DiagnosticsViewModel
 from getpass_qt.viewmodels.employee_badge_viewmodel import EmployeeBadgeViewModel
 from getpass_qt.viewmodels.journal_viewmodel import JournalViewModel
 from getpass_qt.viewmodels.main_viewmodel import ROUTES, MainViewModel
 from getpass_qt.viewmodels.operations_viewmodel import OperationsViewModel
+from getpass_qt.viewmodels.settings_viewmodel import SettingsViewModel
 from getpass_qt.viewmodels.vehicle_pass_viewmodel import VehiclePassViewModel
 from getpass_qt.views.backups import BackupsPage
 from getpass_qt.views.batch import BatchPage
@@ -25,6 +27,7 @@ from getpass_qt.views.employee_badge import EmployeeBadgePage
 from getpass_qt.views.journals import JournalsPage
 from getpass_qt.views.migration_page import MigrationPage
 from getpass_qt.views.operations import OperationsPage
+from getpass_qt.views.settings import SettingsPage
 from getpass_qt.views.vehicle_pass import VehiclePassPage
 from getpass_qt.widgets.sidebar import ROUTE_LABELS, Sidebar
 
@@ -37,6 +40,7 @@ _REAL_ROUTES = frozenset({
     "operations",
     "backups",
     "diagnostics",
+    "settings",
 })
 _MIGRATION_DESCRIPTIONS = {
     route: (
@@ -60,6 +64,8 @@ class MainWindow(QMainWindow):
         operations_viewmodel: OperationsViewModel,
         backups_viewmodel: BackupsViewModel,
         diagnostics_viewmodel: DiagnosticsViewModel,
+        settings_viewmodel: SettingsViewModel,
+        blacklist_viewmodel: BlacklistViewModel,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -124,6 +130,12 @@ class MainWindow(QMainWindow):
 
         self.diagnostics_page = DiagnosticsPage(diagnostics_viewmodel)
         self._add_page("diagnostics", self.diagnostics_page)
+
+        self.settings_page = SettingsPage(
+            settings_viewmodel,
+            blacklist_viewmodel,
+        )
+        self._add_page("settings", self.settings_page)
 
         for route in ROUTES[1:]:
             if route in _REAL_ROUTES:
