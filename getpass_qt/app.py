@@ -12,6 +12,7 @@ from getpass_app.models.journal import JournalField, JournalSnapshot
 from getpass_app.models.preferences import OperatorDefaults
 from getpass_app.services.backup_service import BackupService
 from getpass_app.services.batch_service import BatchService
+from getpass_app.services.blacklist_service import BlacklistService
 from getpass_app.services.diagnostics_service import DiagnosticsService
 from getpass_app.services.employee_badge_service import EmployeeBadgeService
 from getpass_app.services.journal_service import JournalService
@@ -22,10 +23,12 @@ from getpass_qt.main_window import MainWindow
 from getpass_qt.theme.manager import ThemeManager
 from getpass_qt.viewmodels.backups_viewmodel import BackupsViewModel
 from getpass_qt.viewmodels.batch_viewmodel import BatchViewModel
+from getpass_qt.viewmodels.blacklist_viewmodel import BlacklistViewModel
 from getpass_qt.viewmodels.diagnostics_viewmodel import DiagnosticsViewModel
 from getpass_qt.viewmodels.employee_badge_viewmodel import EmployeeBadgeViewModel
 from getpass_qt.viewmodels.journal_viewmodel import JournalViewModel
 from getpass_qt.viewmodels.operations_viewmodel import OperationsViewModel
+from getpass_qt.viewmodels.settings_viewmodel import SettingsViewModel
 from getpass_qt.viewmodels.vehicle_pass_viewmodel import VehiclePassViewModel
 
 
@@ -150,6 +153,20 @@ class _SelfTestDiagnosticsService:
         )
 
 
+class _SelfTestBlacklistService:
+    @staticmethod
+    def list_entries():
+        return ()
+
+    @staticmethod
+    def add_entry(**_kwargs):
+        raise AssertionError("self-test must not edit blacklist data")
+
+    @staticmethod
+    def remove_entry(_entry_id):
+        raise AssertionError("self-test must not edit blacklist data")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="GET-Passes Qt Preview")
     parser.add_argument("--self-test", action="store_true")
@@ -225,6 +242,18 @@ def _diagnostics_viewmodel(*, self_test: bool) -> DiagnosticsViewModel:
     return DiagnosticsViewModel(service)
 
 
+def _settings_viewmodel(
+    service: SettingsService,
+    defaults: OperatorDefaults,
+) -> SettingsViewModel:
+    return SettingsViewModel(service, defaults=defaults)
+
+
+def _blacklist_viewmodel(*, self_test: bool) -> BlacklistViewModel:
+    service = _SelfTestBlacklistService() if self_test else BlacklistService()
+    return BlacklistViewModel(service)
+
+
 def _wait_for_preview_refresh(_window, app) -> None:
     loop = QEventLoop()
     QTimer.singleShot(250, loop.quit)
@@ -273,6 +302,7 @@ def _exercise_self_test(window, app) -> None:
         "operations",
         "backups",
         "diagnostics",
+        "settings",
     ):
         window.sidebar.request_route(route)
         app.processEvents()
@@ -314,6 +344,8 @@ def main(argv: list[str] | None = None) -> int:
         operations_viewmodel=_operations_viewmodel(self_test=args.self_test),
         backups_viewmodel=_backups_viewmodel(self_test=args.self_test),
         diagnostics_viewmodel=_diagnostics_viewmodel(self_test=args.self_test),
+        settings_viewmodel=_settings_viewmodel(settings, operator_defaults),
+        blacklist_viewmodel=_blacklist_viewmodel(self_test=args.self_test),
     )
 
     if args.self_test:
