@@ -14,13 +14,13 @@ jobs:
     runs-on: windows-latest
     env:
       RELEASE_TAG: ${{ github.ref_name }}
+      ARTIFACT_SIGNING_PROFILE: TM5
       HAS_ARTIFACT_SIGNING_SECRETS: >-
         ${{ secrets.AZURE_CLIENT_ID != '' &&
             secrets.AZURE_TENANT_ID != '' &&
             secrets.AZURE_SUBSCRIPTION_ID != '' &&
             secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT != '' &&
-            secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME != '' &&
-            secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE != '' }}
+            secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME != '' }}
       HAS_AZURE_SIGNING_SECRETS: >-
         ${{ secrets.AZURE_CLIENT_ID != '' &&
             secrets.AZURE_TENANT_ID != '' &&
@@ -110,7 +110,7 @@ jobs:
         with:
           endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
           signing-account-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
+          certificate-profile-name: ${{ env.ARTIFACT_SIGNING_PROFILE }}
           files: ${{ github.workspace }}\dist\GET-Passes.exe
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
@@ -122,7 +122,7 @@ jobs:
         with:
           endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
           signing-account-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
+          certificate-profile-name: ${{ env.ARTIFACT_SIGNING_PROFILE }}
           files: ${{ github.workspace }}\dist\GET-Passes-Legacy.exe
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
@@ -184,7 +184,7 @@ jobs:
         with:
           endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
           signing-account-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
+          certificate-profile-name: ${{ env.ARTIFACT_SIGNING_PROFILE }}
           files: ${{ github.workspace }}\dist\installer\GET-Passes-Setup.exe
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
