@@ -7,7 +7,7 @@ from getpass_qt.app import main
 class _SelfTestStack:
     @staticmethod
     def count():
-        return 8
+        return 9
 
 
 class _SelfTestPreview:
@@ -61,6 +61,7 @@ class _SelfTestWindow:
         theme_manager,
         vehicle_viewmodel,
         employee_badge_viewmodel,
+        batch_viewmodel,
         journal_viewmodel,
         operations_viewmodel,
     ):
@@ -113,6 +114,7 @@ def test_qt_self_test_exercises_real_phase4_routes(monkeypatch):
         ("preview", None),
         ("surname", "ИВАНОВ"),
         ("wait", 250),
+        ("route", "batch"),
         ("route", "journals"),
         ("route", "operations"),
     ]

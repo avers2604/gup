@@ -7,6 +7,7 @@ ROUTE_LABELS = {
     "dashboard": "Главная",
     "vehicle": "Пропуск ТС",
     "employee": "Пропуск работника",
+    "batch": "Массовая печать",
     "journals": "Журналы",
     "operations": "Незавершённые",
     "backups": "Резервные копии",

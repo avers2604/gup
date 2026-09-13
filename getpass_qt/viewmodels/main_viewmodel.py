@@ -4,6 +4,7 @@ ROUTES = (
     "dashboard",
     "vehicle",
     "employee",
+    "batch",
     "journals",
     "operations",
     "backups",

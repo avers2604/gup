@@ -6,11 +6,13 @@ from getpass_app.models.journal import JournalField, JournalSnapshot
 from getpass_app.services.settings_service import SettingsService
 from getpass_qt.main_window import MainWindow
 from getpass_qt.theme.manager import ThemeManager
+from getpass_qt.viewmodels.batch_viewmodel import BatchViewModel
 from getpass_qt.viewmodels.employee_badge_viewmodel import EmployeeBadgeViewModel
 from getpass_qt.viewmodels.journal_viewmodel import JournalViewModel
 from getpass_qt.viewmodels.main_viewmodel import MainViewModel
 from getpass_qt.viewmodels.operations_viewmodel import OperationsViewModel
 from getpass_qt.viewmodels.vehicle_pass_viewmodel import VehiclePassViewModel
+from getpass_qt.views.batch import BatchPage
 from getpass_qt.views.employee_badge import EmployeeBadgePage
 from getpass_qt.views.journals import JournalsPage
 from getpass_qt.views.operations import OperationsPage
@@ -110,6 +112,26 @@ class FakeNavigationOperationsService:
         raise AssertionError("navigation test must not cancel operations")
 
 
+class FakeNavigationBatchService:
+    def read_csv(self, path):
+        raise AssertionError("navigation test must not read CSV")
+
+    def parse_pass_rows(self, rows, defaults):
+        raise AssertionError("navigation test must not parse CSV")
+
+    def parse_badge_rows(self, rows, folder, defaults):
+        raise AssertionError("navigation test must not parse CSV")
+
+    def review(self, kind, items):
+        raise AssertionError("navigation test must not review CSV")
+
+    def export_template(self, kind, path):
+        raise AssertionError("navigation test must not export template")
+
+    def generate_pdf(self, kind, items, path, *, cancelled, progress):
+        raise AssertionError("navigation test must not generate PDF")
+
+
 def test_main_viewmodel_defaults_to_dashboard(qtbot):
     vm = MainViewModel()
     assert vm.active_route == "dashboard"
@@ -121,6 +143,14 @@ def test_main_viewmodel_emits_valid_route(qtbot):
         vm.set_route("vehicle")
     assert signal.args == ["vehicle"]
     assert vm.active_route == "vehicle"
+
+
+def test_main_viewmodel_accepts_batch_route(qtbot):
+    vm = MainViewModel()
+    with qtbot.waitSignal(vm.route_changed, timeout=1000) as signal:
+        vm.set_route("batch")
+    assert signal.args == ["batch"]
+    assert vm.active_route == "batch"
 
 
 def test_main_viewmodel_rejects_unknown_route():
@@ -140,12 +170,14 @@ def _window(qapp):
     employee_vm = EmployeeBadgeViewModel(FakeNavigationEmployeeService())
     journal_vm = JournalViewModel(FakeNavigationJournalService())
     operations_vm = OperationsViewModel(FakeNavigationOperationsService())
+    batch_vm = BatchViewModel(FakeNavigationBatchService())
     return MainWindow(
         theme_manager=manager,
         vehicle_viewmodel=vehicle_vm,
         employee_badge_viewmodel=employee_vm,
         journal_viewmodel=journal_vm,
         operations_viewmodel=operations_vm,
+        batch_viewmodel=batch_vm,
     )
 
 
@@ -153,12 +185,13 @@ def test_main_window_has_variant_a_sidebar_and_stack(qapp, qtbot):
     window = _window(qapp)
     qtbot.addWidget(window)
     assert window.sidebar.objectName() == "Sidebar"
-    assert window.stack.count() == 8
+    assert window.stack.count() == 9
     assert window.active_route == "dashboard"
     assert isinstance(window.vehicle_page, VehiclePassPage)
     assert isinstance(window.employee_page, EmployeeBadgePage)
     assert isinstance(window.journals_page, JournalsPage)
     assert isinstance(window.operations_page, OperationsPage)
+    assert isinstance(window.batch_page, BatchPage)
 
 
 def test_sidebar_switches_to_vehicle_page(qapp, qtbot):
@@ -188,9 +221,27 @@ def test_phase4_routes_use_real_journal_and_operations_pages(qapp, qtbot):
     assert window.stack.currentWidget() is window.operations_page
 
 
+def test_batch_route_uses_real_batch_page(qapp, qtbot):
+    window = _window(qapp)
+    qtbot.addWidget(window)
+
+    window.sidebar.request_route("batch")
+
+    assert window.active_route == "batch"
+    assert window.stack.currentWidget() is window.batch_page
+
+
 def test_dashboard_primary_action_navigates_to_vehicle(qapp, qtbot):
     window = _window(qapp)
     qtbot.addWidget(window)
     qtbot.mouseClick(window.dashboard.vehicle_button, Qt.MouseButton.LeftButton)
     assert window.active_route == "vehicle"
     assert window.stack.currentWidget() is window.vehicle_page
+
+
+def test_dashboard_batch_action_navigates_to_batch(qapp, qtbot):
+    window = _window(qapp)
+    qtbot.addWidget(window)
+    qtbot.mouseClick(window.dashboard.batch_button, Qt.MouseButton.LeftButton)
+    assert window.active_route == "batch"
+    assert window.stack.currentWidget() is window.batch_page

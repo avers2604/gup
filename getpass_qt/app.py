@@ -8,6 +8,7 @@ from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from getpass_app.models.journal import JournalField, JournalSnapshot
+from getpass_app.services.batch_service import BatchService
 from getpass_app.services.employee_badge_service import EmployeeBadgeService
 from getpass_app.services.journal_service import JournalService
 from getpass_app.services.operations_service import OperationsService
@@ -15,6 +16,7 @@ from getpass_app.services.settings_service import SettingsService
 from getpass_app.services.vehicle_pass_service import VehiclePassService
 from getpass_qt.main_window import MainWindow
 from getpass_qt.theme.manager import ThemeManager
+from getpass_qt.viewmodels.batch_viewmodel import BatchViewModel
 from getpass_qt.viewmodels.employee_badge_viewmodel import EmployeeBadgeViewModel
 from getpass_qt.viewmodels.journal_viewmodel import JournalViewModel
 from getpass_qt.viewmodels.operations_viewmodel import OperationsViewModel
@@ -89,6 +91,30 @@ class _SelfTestOperationsService:
         raise AssertionError("self-test must not cancel operations")
 
 
+class _SelfTestBatchService:
+    @staticmethod
+    def _unexpected():
+        raise AssertionError("self-test must not access batch files or output")
+
+    def read_csv(self, _path):
+        return self._unexpected()
+
+    def parse_pass_rows(self, _rows, _defaults):
+        return self._unexpected()
+
+    def parse_badge_rows(self, _rows, _folder, _defaults):
+        return self._unexpected()
+
+    def review(self, _kind, _items):
+        return self._unexpected()
+
+    def export_template(self, _kind, _path):
+        return self._unexpected()
+
+    def generate_pdf(self, _kind, _items, _path, *, cancelled, progress):
+        return self._unexpected()
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="GET-Passes Qt Preview")
     parser.add_argument("--self-test", action="store_true")
@@ -127,6 +153,11 @@ def _employee_badge_viewmodel(*, self_test: bool) -> EmployeeBadgeViewModel:
     return EmployeeBadgeViewModel(service)
 
 
+def _batch_viewmodel(*, self_test: bool) -> BatchViewModel:
+    service = _SelfTestBatchService() if self_test else BatchService()
+    return BatchViewModel(service)
+
+
 def _journal_viewmodel(*, self_test: bool) -> JournalViewModel:
     service = _SelfTestJournalService() if self_test else JournalService()
     return JournalViewModel(service)
@@ -146,7 +177,7 @@ def _wait_for_preview_refresh(_window, app) -> None:
 
 def _exercise_self_test(window, app) -> None:
     assert window.active_route == "dashboard"
-    assert window.stack.count() == 8
+    assert window.stack.count() == 9
 
     window.sidebar.request_route("vehicle")
     app.processEvents()
@@ -179,6 +210,10 @@ def _exercise_self_test(window, app) -> None:
     _wait_for_preview_refresh(window, app)
     assert badge_preview.has_image
 
+    window.sidebar.request_route("batch")
+    app.processEvents()
+    assert window.active_route == "batch"
+
     window.sidebar.request_route("journals")
     app.processEvents()
     assert window.active_route == "journals"
@@ -210,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         employee_badge_viewmodel=_employee_badge_viewmodel(
             self_test=args.self_test
         ),
+        batch_viewmodel=_batch_viewmodel(self_test=args.self_test),
         journal_viewmodel=_journal_viewmodel(self_test=args.self_test),
         operations_viewmodel=_operations_viewmodel(self_test=args.self_test),
     )
