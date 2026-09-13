@@ -7,12 +7,17 @@ from PIL import Image
 from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
+from getpass_app.models.journal import JournalField, JournalSnapshot
 from getpass_app.services.employee_badge_service import EmployeeBadgeService
+from getpass_app.services.journal_service import JournalService
+from getpass_app.services.operations_service import OperationsService
 from getpass_app.services.settings_service import SettingsService
 from getpass_app.services.vehicle_pass_service import VehiclePassService
 from getpass_qt.main_window import MainWindow
 from getpass_qt.theme.manager import ThemeManager
 from getpass_qt.viewmodels.employee_badge_viewmodel import EmployeeBadgeViewModel
+from getpass_qt.viewmodels.journal_viewmodel import JournalViewModel
+from getpass_qt.viewmodels.operations_viewmodel import OperationsViewModel
 from getpass_qt.viewmodels.vehicle_pass_viewmodel import VehiclePassViewModel
 
 
@@ -24,6 +29,64 @@ class _SelfTestBadgeJournal:
     @staticmethod
     def find_duplicates(_tab_num):
         return ()
+
+
+class _SelfTestJournalService:
+    @staticmethod
+    def journal_keys():
+        return ("pass", "badge")
+
+    @staticmethod
+    def snapshot(journal_key, filters, **kwargs):
+        return JournalSnapshot(
+            journal_key=journal_key,
+            journal_name="Self-test journal",
+            fields=(JournalField("status", "Статус", 100),),
+            rows=(),
+            total_records=0,
+            filtered_records=0,
+            page=0,
+            page_size=kwargs.get("page_size", 100),
+            page_count=1,
+        )
+
+    @staticmethod
+    def distinct(journal_key, key):
+        return ()
+
+    @staticmethod
+    def update_record(*_args):
+        raise AssertionError("self-test must not update journal data")
+
+    @staticmethod
+    def revoke(*_args):
+        raise AssertionError("self-test must not revoke journal data")
+
+    @staticmethod
+    def history(*_args):
+        return ()
+
+    @staticmethod
+    def export(*_args):
+        raise AssertionError("self-test must not export journal data")
+
+    @staticmethod
+    def add_revoked_to_blacklist(*_args):
+        raise AssertionError("self-test must not edit blacklist data")
+
+
+class _SelfTestOperationsService:
+    @staticmethod
+    def pending():
+        return ()
+
+    @staticmethod
+    def confirm(_ids):
+        raise AssertionError("self-test must not confirm operations")
+
+    @staticmethod
+    def cancel(_ids):
+        raise AssertionError("self-test must not cancel operations")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -62,6 +125,16 @@ def _employee_badge_viewmodel(*, self_test: bool) -> EmployeeBadgeViewModel:
     else:
         service = EmployeeBadgeService()
     return EmployeeBadgeViewModel(service)
+
+
+def _journal_viewmodel(*, self_test: bool) -> JournalViewModel:
+    service = _SelfTestJournalService() if self_test else JournalService()
+    return JournalViewModel(service)
+
+
+def _operations_viewmodel(*, self_test: bool) -> OperationsViewModel:
+    service = _SelfTestOperationsService() if self_test else OperationsService()
+    return OperationsViewModel(service)
 
 
 def _wait_for_preview_refresh(_window, app) -> None:
@@ -106,6 +179,14 @@ def _exercise_self_test(window, app) -> None:
     _wait_for_preview_refresh(window, app)
     assert badge_preview.has_image
 
+    window.sidebar.request_route("journals")
+    app.processEvents()
+    assert window.active_route == "journals"
+
+    window.sidebar.request_route("operations")
+    app.processEvents()
+    assert window.active_route == "operations"
+
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
@@ -129,6 +210,8 @@ def main(argv: list[str] | None = None) -> int:
         employee_badge_viewmodel=_employee_badge_viewmodel(
             self_test=args.self_test
         ),
+        journal_viewmodel=_journal_viewmodel(self_test=args.self_test),
+        operations_viewmodel=_operations_viewmodel(self_test=args.self_test),
     )
 
     if args.self_test:

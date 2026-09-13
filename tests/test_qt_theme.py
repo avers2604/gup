@@ -44,6 +44,19 @@ def test_employee_badge_styles_use_semantic_tokens_and_states():
     assert LIGHT.focus in css
 
 
+def test_phase4_table_styles_use_semantic_tokens():
+    css = build_stylesheet("light")
+
+    assert "QTableView" in css
+    assert "QHeaderView::section" in css
+    assert "QTableView::item:selected" in css
+    assert LIGHT.surface in css
+    assert LIGHT.surface_alt in css
+    assert LIGHT.line in css
+    assert LIGHT.primary in css
+    assert LIGHT.on_primary in css
+
+
 def test_theme_manager_persists_toggle(qapp):
     saved = []
     service = SettingsService(

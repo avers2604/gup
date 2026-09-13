@@ -125,6 +125,38 @@ QWidget#PhotoCropCanvas {{
     border: 1px solid {p.line_strong};
     border-radius: 12px;
 }}
+QTableView {{
+    background: {p.surface};
+    alternate-background-color: {p.surface_alt};
+    color: {p.ink};
+    border: 1px solid {p.line};
+    border-radius: 12px;
+    gridline-color: {p.line};
+    selection-background-color: {p.primary};
+    selection-color: {p.on_primary};
+}}
+QTableView::item {{
+    padding: 6px 8px;
+    border-bottom: 1px solid {p.line};
+}}
+QTableView::item:selected {{
+    background: {p.primary};
+    color: {p.on_primary};
+}}
+QHeaderView::section {{
+    background: {p.surface_alt};
+    color: {p.ink};
+    border: 0;
+    border-right: 1px solid {p.line};
+    border-bottom: 1px solid {p.line_strong};
+    padding: 8px 10px;
+    font-weight: 700;
+}}
+QTableCornerButton::section {{
+    background: {p.surface_alt};
+    border: 0;
+    border-bottom: 1px solid {p.line_strong};
+}}
 QPushButton#PrintButton, QPushButton#BadgePrintButton {{
     min-height: 22px;
     background: {p.accent_fill};
