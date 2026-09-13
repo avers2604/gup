@@ -14,7 +14,7 @@ jobs:
     runs-on: windows-latest
     env:
       RELEASE_TAG: ${{ github.ref_name }}
-      ARTIFACT_SIGNING_PROFILE: TM5
+      ARTIFACT_SIGNING_PROFILE: TM5-CodeSign
       HAS_ARTIFACT_SIGNING_SECRETS: >-
         ${{ secrets.AZURE_CLIENT_ID != '' &&
             secrets.AZURE_TENANT_ID != '' &&
