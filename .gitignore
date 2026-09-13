@@ -34,6 +34,13 @@ photos/
 test_DoT_Icons.png
 Backup_GET_*.zip
 
+# --- Приватные ключи и сертификаты с private key ---
+# Публичные .cer/.crt разрешены; PFX/P12/private key никогда не коммитим.
+*.pfx
+*.p12
+*.key
+*.pem.key
+
 # --- Сборка ---
 build/
 dist/
