@@ -11,6 +11,7 @@ from getpass_app.models.employee_badge import (
     EmployeeBadgeState,
     validate_employee_badge,
 )
+from getpass_app.models.preferences import OperatorDefaults
 from getpass_app.services.employee_badge_service import (
     EmployeeBadgeOutputError,
     EmployeeBadgeService,
@@ -34,13 +35,18 @@ class EmployeeBadgeViewModel(QObject):
         self,
         service: EmployeeBadgeService,
         *,
+        defaults: OperatorDefaults | None = None,
         now=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._service = service
         self._now = now or datetime.now
-        self._state = self._fresh_state()
+        self._defaults = defaults or OperatorDefaults()
+        self._state = self._fresh_state(
+            tab_num=self._defaults.badge_tab_num,
+            park=self._defaults.badge_park,
+        )
 
     @property
     def state(self) -> EmployeeBadgeState:
@@ -151,4 +157,7 @@ class EmployeeBadgeViewModel(QObject):
             issue_date=format_date(now),
             valid_until=format_date(add_years_safe(now, 5)),
         )
-        return EmployeeBadgeState(data=data)
+        return EmployeeBadgeState(
+            data=data,
+            print_mode=self._defaults.badge_print_mode,
+        )
