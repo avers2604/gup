@@ -13,7 +13,7 @@ jobs:
   build:
     runs-on: windows-latest
     env:
-      ARTIFACT_SIGNING_PROFILE: TM5
+      ARTIFACT_SIGNING_PROFILE: TM5-CodeSign
       HAS_ARTIFACT_SIGNING_SECRETS: >-
         ${{ secrets.AZURE_CLIENT_ID != '' &&
             secrets.AZURE_TENANT_ID != '' &&
