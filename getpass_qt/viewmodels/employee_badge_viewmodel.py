@@ -59,7 +59,10 @@ class EmployeeBadgeViewModel(QObject):
         return self._service.printers()
 
     def warnings(self):
-        return self._service.warnings(self._state)
+        warnings = self._service.warnings(self._state)
+        if self._defaults.warn_duplicates:
+            return warnings
+        return replace(warnings, duplicates=())
 
     def set_field(self, field: str, value) -> None:
         if field not in _BADGE_FIELDS:
