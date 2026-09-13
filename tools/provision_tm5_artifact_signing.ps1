@@ -8,7 +8,7 @@ param(
     [string]$ResourceGroup = "rg-tm5-signing",
     [string]$Location = "WestEurope",
     [string]$AccountName = "",
-    [string]$ProfileName = "TM5"
+    [string]$ProfileName = "TM5-CodeSign"
 )
 
 $ErrorActionPreference = "Stop"
@@ -111,17 +111,17 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($endpoint)) {
     throw "Unable to read Artifact Signing endpoint."
 }
 
-$profile = az artifact-signing certificate-profile show `
+az artifact-signing certificate-profile show `
     --resource-group $ResourceGroup `
     --account-name $AccountName `
     --name $ProfileName `
-    -o json
+    -o json | Out-Null
 if ($LASTEXITCODE -ne 0) {
     throw "Unable to verify Public Trust profile $ProfileName."
 }
 
 Write-Host ""
-Write-Host "TM5 Public Trust profile is ready."
+Write-Host "TM5 signing infrastructure is ready."
 Write-Host "Artifact Signing endpoint: $endpoint"
 Write-Host "Artifact Signing account:  $AccountName"
 Write-Host "Certificate profile:        $ProfileName"
@@ -133,5 +133,5 @@ Write-Host "  AZURE_SUBSCRIPTION_ID=$SubscriptionId"
 Write-Host "  AZURE_ARTIFACT_SIGNING_ENDPOINT=$endpoint"
 Write-Host "  AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME=$AccountName"
 Write-Host ""
-Write-Host "The certificate subject shown by Windows is the legal identity validated by Microsoft."
-Write-Host "TM5 is the certificate profile name; Microsoft Public Trust does not allow an arbitrary CN/O."
+Write-Host "The Windows publisher is the legal/DBA identity validated by Microsoft."
+Write-Host "To display TM5 as publisher, TM5 itself must be the validated identity; TM5-CodeSign is only the technical profile name."
