@@ -34,103 +34,85 @@ jobs:
       - name: Run tests on Windows
         run: python -m pytest
 
-      - name: Smoke-test Qt preview from source
-        run: python -m getpass_qt --self-test
+      - name: Smoke-test Qt production from source
+        run: python pass_generator.py --self-test
 
-      - name: Build unsigned EXE
+      - name: Smoke-test Tkinter rollback from source
+        run: python legacy_pass_generator.py --self-test
+
+      - name: Build unsigned production EXE
         shell: pwsh
         run: |
           $args = @(
-            '--noconfirm',
-            '--clean',
-            '--onefile',
-            '--windowed',
-            '--icon', 'app_icon.ico',
-            '--name', 'GET-Passes'
+            '--noconfirm', '--clean', '--onefile', '--windowed',
+            '--icon', 'app_icon.ico', '--name', 'GET-Passes'
           )
-
           if (Test-Path 'assets') { $args += @('--add-data', 'assets;assets') }
           if (Test-Path 'fonts') { $args += @('--add-data', 'fonts;fonts') }
           if (Test-Path 'fronts') { $args += @('--add-data', 'fronts;fronts') }
           if (Test-Path 'app_icon.ico') { $args += @('--add-data', 'app_icon.ico;.') }
-
           python -m PyInstaller @args 'pass_generator.py'
 
-      - name: Smoke-test packaged application
+      - name: Smoke-test packaged production application
         shell: pwsh
         run: |
           $check = Start-Process -FilePath 'dist\GET-Passes.exe' -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
-          if (-not $check.WaitForExit(60000)) {
-            $check.Kill()
-            throw 'Smoke test timed out'
-          }
-          if ($check.ExitCode -ne 0) { throw 'Smoke test failed' }
+          if (-not $check.WaitForExit(60000)) { $check.Kill(); throw 'Production smoke test timed out' }
+          if ($check.ExitCode -ne 0) { throw 'Production smoke test failed' }
 
-      - name: Build Qt preview EXE
+      - name: Build legacy rollback EXE
         shell: pwsh
         run: |
           $args = @(
-            '--noconfirm',
-            '--clean',
-            '--onefile',
-            '--windowed',
-            '--icon', 'app_icon.ico',
-            '--name', 'GET-Passes-Qt-Preview'
+            '--noconfirm', '--clean', '--onefile', '--windowed',
+            '--icon', 'app_icon.ico', '--name', 'GET-Passes-Legacy'
           )
+          if (Test-Path 'assets') { $args += @('--add-data', 'assets;assets') }
+          if (Test-Path 'fonts') { $args += @('--add-data', 'fonts;fonts') }
+          if (Test-Path 'fronts') { $args += @('--add-data', 'fronts;fronts') }
           if (Test-Path 'app_icon.ico') { $args += @('--add-data', 'app_icon.ico;.') }
-          python -m PyInstaller @args 'getpass_qt\__main__.py'
+          python -m PyInstaller @args 'legacy_pass_generator.py'
 
-      - name: Smoke-test packaged Qt preview
+      - name: Smoke-test packaged legacy rollback
         shell: pwsh
         run: |
-          $check = Start-Process -FilePath 'dist\GET-Passes-Qt-Preview.exe' -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
-          if (-not $check.WaitForExit(60000)) {
-            $check.Kill()
-            throw 'Qt preview smoke test timed out'
-          }
-          if ($check.ExitCode -ne 0) { throw 'Qt preview smoke test failed' }
+          $check = Start-Process -FilePath 'dist\GET-Passes-Legacy.exe' -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
+          if (-not $check.WaitForExit(60000)) { $check.Kill(); throw 'Legacy rollback smoke test timed out' }
+          if ($check.ExitCode -ne 0) { throw 'Legacy rollback smoke test failed' }
 
       - name: Build Inno Setup installer
         shell: pwsh
         run: |
           $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-          if ($command) {
-            $isccPath = $command.Source
-          } else {
-            $isccPath = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-          }
+          if ($command) { $isccPath = $command.Source } else { $isccPath = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe' }
           if (-not (Test-Path $isccPath)) { throw 'ISCC.exe not found' }
           & $isccPath 'installer\GET-Passes.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Inno Setup build failed' }
-          if (-not (Test-Path 'dist\installer\GET-Passes-Setup.exe')) {
-            throw 'GET-Passes-Setup.exe not found'
-          }
+          if (-not (Test-Path 'dist\installer\GET-Passes-Setup.exe')) { throw 'GET-Passes-Setup.exe not found' }
 
       - name: Install, self-test and uninstall Setup.exe
         shell: pwsh
         run: |
           $setup = (Resolve-Path 'dist\installer\GET-Passes-Setup.exe').Path
           $installDir = Join-Path $env:RUNNER_TEMP 'GET-Passes-installed'
-          $installArgs = @(
-            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-',
-            "/DIR=$installDir"
-          )
+          $installArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$installDir")
           $install = Start-Process -FilePath $setup -ArgumentList $installArgs -PassThru -Wait
           if ($install.ExitCode -ne 0) { throw "Installer failed: $($install.ExitCode)" }
 
           $installedExe = Join-Path $installDir 'GET-Passes.exe'
-          if (-not (Test-Path $installedExe)) { throw 'Installed EXE not found' }
-          $check = Start-Process -FilePath $installedExe -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
-          if (-not $check.WaitForExit(60000)) {
-            $check.Kill()
-            throw 'Installed application self-test timed out'
+          $installedLegacy = Join-Path $installDir 'GET-Passes-Legacy.exe'
+          if (-not (Test-Path $installedExe)) { throw 'Installed production EXE not found' }
+          if (-not (Test-Path $installedLegacy)) { throw 'Installed rollback EXE not found' }
+
+          foreach ($exe in @($installedExe, $installedLegacy)) {
+            $check = Start-Process -FilePath $exe -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
+            if (-not $check.WaitForExit(60000)) { $check.Kill(); throw "Installed self-test timed out: $exe" }
+            if ($check.ExitCode -ne 0) { throw "Installed self-test failed: $exe" }
           }
-          if ($check.ExitCode -ne 0) { throw 'Installed application self-test failed' }
 
           $uninstaller = Join-Path $installDir 'unins000.exe'
           if (-not (Test-Path $uninstaller)) { throw 'unins000.exe not found' }
-          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @(
-            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
-          ) -PassThru -Wait
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -PassThru -Wait
           if ($uninstall.ExitCode -ne 0) { throw "Uninstaller failed: $($uninstall.ExitCode)" }
-          if (Test-Path $installedExe) { throw 'Installed EXE remains after uninstall' }
+          if (Test-Path $installedExe) { throw 'Installed production EXE remains after uninstall' }
+          if (Test-Path $installedLegacy) { throw 'Installed rollback EXE remains after uninstall' }
