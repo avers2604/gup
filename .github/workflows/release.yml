@@ -15,6 +15,9 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.ref_name }}
       ARTIFACT_SIGNING_PROFILE: TM5-CodeSign
+      HAS_TM5_PRIVATE_SIGNING_SECRETS: >-
+        ${{ secrets.TM5_SIGN_CERT_BASE64 != '' &&
+            secrets.TM5_SIGN_CERT_PASSWORD != '' }}
       HAS_ARTIFACT_SIGNING_SECRETS: >-
         ${{ secrets.AZURE_CLIENT_ID != '' &&
             secrets.AZURE_TENANT_ID != '' &&
@@ -52,8 +55,8 @@ jobs:
       - name: Require trusted signing for stable release
         shell: pwsh
         run: |
-          if ('${{ env.HAS_ARTIFACT_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_AZURE_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_WINDOWS_SIGNING_SECRETS }}' -ne 'true') {
-            throw 'Stable release requires trusted Authenticode signing secrets. See docs/SIGNING.md.'
+          if ('${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_ARTIFACT_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_AZURE_SIGNING_SECRETS }}' -ne 'true' -and '${{ env.HAS_WINDOWS_SIGNING_SECRETS }}' -ne 'true') {
+            throw 'Stable release requires Authenticode signing secrets. See docs/SIGNING.md.'
           }
 
       - name: Install build dependencies
@@ -96,8 +99,25 @@ jobs:
             if ($check.ExitCode -ne 0) { throw "Smoke test failed: $exe" }
           }
 
+      - name: Sign EXE with TM5 Private PKI
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS == 'true' }}
+        shell: pwsh
+        env:
+          TM5_SIGN_CERT_BASE64: ${{ secrets.TM5_SIGN_CERT_BASE64 }}
+          TM5_SIGN_CERT_PASSWORD: ${{ secrets.TM5_SIGN_CERT_PASSWORD }}
+        run: |
+          Import-Certificate -FilePath 'certs\TM5-Root-CA.cer' -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'tm5-codesign.pfx'
+          [System.IO.File]::WriteAllBytes($pfxPath, [System.Convert]::FromBase64String($env:TM5_SIGN_CERT_BASE64))
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found' }
+          foreach ($exe in @('dist\GET-Passes.exe','dist\GET-Passes-Legacy.exe')) {
+            & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:TM5_SIGN_CERT_PASSWORD" /v $exe
+            if ($LASTEXITCODE -ne 0) { throw "TM5 EXE signing failed: $exe" }
+          }
+
       - name: Azure login
-        if: ${{ env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' || env.HAS_AZURE_SIGNING_SECRETS == 'true' }}
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && (env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' || env.HAS_AZURE_SIGNING_SECRETS == 'true') }}
         uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac # v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -105,7 +125,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign production EXE with Azure Artifact Signing
-        if: ${{ env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
@@ -117,7 +137,7 @@ jobs:
           timestamp-digest: SHA256
 
       - name: Sign rollback EXE with Azure Artifact Signing
-        if: ${{ env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
@@ -129,7 +149,7 @@ jobs:
           timestamp-digest: SHA256
 
       - name: Sign EXE with Azure Key Vault certificate
-        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' }}
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && env.HAS_AZURE_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
           AZURE_KEY_VAULT_NAME: ${{ secrets.AZURE_KEY_VAULT_NAME }}
@@ -146,7 +166,7 @@ jobs:
           }
 
       - name: Sign EXE with PFX certificate
-        if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
           WINDOWS_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_SIGN_CERT_BASE64 }}
@@ -178,8 +198,20 @@ jobs:
           & $isccPath 'installer\GET-Passes.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Inno Setup build failed' }
 
+      - name: Sign installer with TM5 Private PKI
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS == 'true' }}
+        shell: pwsh
+        env:
+          TM5_SIGN_CERT_PASSWORD: ${{ secrets.TM5_SIGN_CERT_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'tm5-codesign.pfx'
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found' }
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$pfxPath" /p "$env:TM5_SIGN_CERT_PASSWORD" /v 'dist\installer\GET-Passes-Setup.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'TM5 installer signing failed' }
+
       - name: Sign installer with Azure Artifact Signing
-        if: ${{ env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS == 'true' }}
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
@@ -191,7 +223,7 @@ jobs:
           timestamp-digest: SHA256
 
       - name: Sign installer with Azure Key Vault certificate
-        if: ${{ env.HAS_AZURE_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' }}
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && env.HAS_AZURE_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
           AZURE_SIGN_CERT_PASSWORD: ${{ secrets.AZURE_SIGN_CERT_PASSWORD }}
@@ -203,7 +235,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installer signing failed' }
 
       - name: Sign installer with PFX certificate
-        if: ${{ env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
+        if: ${{ env.HAS_TM5_PRIVATE_SIGNING_SECRETS != 'true' && env.HAS_WINDOWS_SIGNING_SECRETS == 'true' && env.HAS_ARTIFACT_SIGNING_SECRETS != 'true' && env.HAS_AZURE_SIGNING_SECRETS != 'true' }}
         shell: pwsh
         env:
           WINDOWS_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
