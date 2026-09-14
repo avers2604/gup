@@ -14,8 +14,24 @@ QWidget {{
 }}
 QMainWindow, QWidget#AppShell {{ background: {p.ground}; }}
 QScrollArea {{ background: transparent; border: 0; }}
+QLabel {{ background: transparent; }}
 QFrame#Sidebar {{ background: {p.primary}; }}
+QFrame#SidebarLogoCard {{ background: #FFFFFF; border-radius: 14px; }}
 QLabel#SidebarBrand {{ color: {p.on_primary}; font-size: 18pt; font-weight: 700; }}
+QPushButton {{
+    background: {p.surface};
+    color: {p.ink};
+    border: 1px solid {p.line_strong};
+    border-radius: 12px;
+    padding: 8px 14px;
+}}
+QPushButton:hover {{ background: {p.surface_alt}; border-color: {p.focus}; }}
+QPushButton:pressed {{ background: {p.line}; }}
+QPushButton:disabled {{
+    color: {p.ink_faint};
+    background: {p.surface_alt};
+    border-color: {p.line};
+}}
 QPushButton[role=\"nav\"] {{
     background: transparent;
     color: {p.on_primary};
