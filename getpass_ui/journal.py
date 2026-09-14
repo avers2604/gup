@@ -300,21 +300,6 @@ class JournalWindow:
                                  parent=self.win)
         return False
 
-    def delete_selected(self):
-        ids = self._selected_ids()
-        if not ids:
-            messagebox.showinfo("Выбор", "Выберите записи.", parent=self.win)
-            return
-        if not messagebox.askyesno(
-                "Удаление без следа",
-                f"Удалить записи ({len(ids)} шт.) НАВСЕГДА?\n\n"
-                "Для отзыва пропуска правильнее «Аннулировать» — запись\n"
-                "останется в журнале с отметкой и датой.",
-                parent=self.win):
-            return
-        if self._save(self.journal.delete_ids, ids):
-            self.apply_filter()
-
     def revoke_selected(self):
         ids = self._selected_ids()
         if not ids:

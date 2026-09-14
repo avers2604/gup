@@ -236,6 +236,11 @@ class BadgePanel:
                          on_cancel=self._on_crop_cancel)
 
     def _on_crop_cancel(self):
+        # Черновик может восстановить photo_path на файл, которого больше
+        # нет на диске (удалён/перемещён между запусками) — тогда статус не
+        # должен врать, что фото готово.
+        if self.photo_path and not os.path.exists(self.photo_path):
+            self.photo_path = None
         if not self.photo_path:
             self.photo_status.config(text="Фото не выбрано", fg=self.theme.c("danger"))
         else:

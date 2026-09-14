@@ -252,3 +252,37 @@ class TestDistinctAndBrands:
     def test_known_car_brands_empty_when_no_cache(self, data_dir):
         from getpass_core.storage import known_car_brands
         assert known_car_brands() == []
+
+
+class TestConnectionOverhead:
+    def test_ensure_table_runs_once_per_journal_instance(self, journal):
+        # _ensure_table() открывает BEGIN IMMEDIATE и прогоняет миграции —
+        # это нужно один раз при первом подключении, а не на каждом read()/
+        # write(), иначе любое чтение журнала берёт эксклюзивную блокировку
+        # записи без необходимости.
+        calls = []
+        original = journal._ensure_table
+
+        def counted(conn):
+            calls.append(1)
+            return original(conn)
+
+        journal._ensure_table = counted
+        journal.append_many([{"num": "001-26", "plate": "А111АА78"}])
+        journal.read()
+        journal.read()
+        assert len(calls) == 1
+
+    def test_ensure_table_reruns_when_db_file_changes(self, journal, data_dir, monkeypatch):
+        # Кэш держится по пути к файлу базы, а не просто булевым флагом:
+        # DB_FILE может смениться в рамках процесса (тесты, восстановление
+        # из бэкапа), и для нового файла схему всё равно нужно проверить —
+        # иначе read() упадёт на "no such table" вместо того, чтобы создать
+        # таблицу в новом файле.
+        from getpass_core import config
+        journal.append_many([{"num": "001-26", "plate": "А111АА78"}])
+        assert len(journal.read()) == 1
+
+        other_db = str(data_dir / "other.sqlite3")
+        monkeypatch.setattr(config, "DB_FILE", other_db)
+        assert journal.read() == []

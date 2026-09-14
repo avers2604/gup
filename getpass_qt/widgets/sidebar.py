@@ -1,6 +1,11 @@
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
+import io
 
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton,
+                               QVBoxLayout)
+
+from getpass_core.blank import load_logo
 from getpass_qt.viewmodels.main_viewmodel import ROUTES
 
 ROUTE_LABELS = {
@@ -28,9 +33,7 @@ class Sidebar(QFrame):
         layout.setContentsMargins(16, 24, 16, 20)
         layout.setSpacing(6)
 
-        brand = QLabel("GET-Passes")
-        brand.setObjectName("SidebarBrand")
-        layout.addWidget(brand)
+        layout.addWidget(self._build_brand(), 0, Qt.AlignLeft)
         layout.addSpacing(18)
 
         for route in ROUTES:
@@ -45,6 +48,26 @@ class Sidebar(QFrame):
 
         layout.addStretch(1)
         self.set_active("dashboard")
+
+    @staticmethod
+    def _build_brand() -> QFrame:
+        logo = load_logo(148)
+        if logo is None:
+            brand = QLabel("GET-Passes")
+            brand.setObjectName("SidebarBrand")
+            return brand
+        buffer = io.BytesIO()
+        logo.save(buffer, format="PNG")
+        pixmap = QPixmap()
+        pixmap.loadFromData(buffer.getvalue(), "PNG")
+        card = QFrame()
+        card.setObjectName("SidebarLogoCard")
+        card_layout = QHBoxLayout(card)
+        card_layout.setContentsMargins(10, 8, 10, 8)
+        icon = QLabel()
+        icon.setPixmap(pixmap)
+        card_layout.addWidget(icon)
+        return card
 
     def request_route(self, route: str) -> None:
         self.route_requested.emit(route)
