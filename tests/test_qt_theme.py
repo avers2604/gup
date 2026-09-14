@@ -74,6 +74,18 @@ def test_checkboxes_have_no_stylesheet_background():
     assert "background" not in checkbox_rule
 
 
+def test_combobox_down_arrow_has_single_rule_for_all_states():
+    # У QComboBox::down-arrow должно быть РОВНО одно правило на все
+    # состояния. Добавление QComboBox:hover::down-arrow /
+    # QComboBox:on::down-arrow / QComboBox:disabled::down-arrow —
+    # даже с одной и той же картинкой — заставляет Qt/Fusion рисовать
+    # ДВА шеврона одновременно (второй — блёклый, по центру поля) уже
+    # в состоянии покоя, когда ни hover, ни on, ни disabled не активны.
+    # Подтверждено вручную рендером QComboBox в offscreen-режиме.
+    css = build_stylesheet("light")
+    assert css.count("::down-arrow") == 1
+
+
 def test_default_pushbutton_has_branded_shape():
     # Без базового стиля кнопки без role остаются нативными серыми
     # прямоугольниками среди скруглённых брендовых кнопок.

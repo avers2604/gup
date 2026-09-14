@@ -1,10 +1,50 @@
+import os
+import tempfile
+
+from PIL import Image, ImageDraw
+
 from getpass_design.tokens import PALETTES
+
+_ICON_CACHE_DIR = os.path.join(tempfile.gettempdir(), "get_passes_qt_icons")
+
+
+def _chevron_icon_path(color: str) -> str:
+    """Путь к PNG-шеврону нужного цвета — рисуется один раз и кешируется.
+
+    Встроенный Qt::down-arrow через border-color рисует сплошной
+    прямоугольник вместо треугольника (проверено на реальном рендере),
+    поэтому стрелка комбобокса — обычная картинка, как и логотип в
+    сайдбаре.
+    """
+    safe_name = color.lstrip("#").upper()
+    path = os.path.join(_ICON_CACHE_DIR, f"chevron_{safe_name}.png")
+    if os.path.exists(path):
+        return path
+    os.makedirs(_ICON_CACHE_DIR, exist_ok=True)
+    size = 24
+    scale = 4
+    canvas = size * scale
+    img = Image.new("RGBA", (canvas, canvas), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    width = max(2, int(canvas * 0.10))
+    pad = canvas * 0.26
+    top = canvas * 0.38
+    bottom = canvas * 0.62
+    mid = canvas / 2
+    points = [(pad, top), (mid, bottom), (canvas - pad, top)]
+    draw.line(points, fill=color, width=width, joint="curve")
+    radius = width / 2
+    for x, y in points:
+        draw.ellipse([x - radius, y - radius, x + radius, y + radius], fill=color)
+    img.resize((size, size), Image.LANCZOS).save(path)
+    return path
 
 
 def build_stylesheet(theme: str) -> str:
     if theme not in PALETTES:
         raise ValueError(f"Unknown theme: {theme}")
     p = PALETTES[theme]
+    chevron = _chevron_icon_path(p.accent).replace("\\", "/")
     return f"""
 QWidget {{
     background: {p.ground};
@@ -74,16 +114,32 @@ QLineEdit, QComboBox {{
     selection-background-color: {p.primary};
     selection-color: {p.on_primary};
 }}
+QComboBox {{ padding-right: 32px; }}
 QLineEdit:focus, QComboBox:focus {{
     border: 2px solid {p.focus};
 }}
 QLineEdit[invalid=\"true\"], QComboBox[invalid=\"true\"] {{
     border: 2px solid {p.danger};
 }}
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 30px;
+    border: none;
+    background: transparent;
+}}
+QComboBox::down-arrow {{
+    image: url(\"{chevron}\");
+    width: 13px;
+    height: 13px;
+}}
 QComboBox QAbstractItemView {{
     background: {p.surface};
     color: {p.ink};
     border: 1px solid {p.line};
+    border-radius: 10px;
+    padding: 4px;
+    outline: none;
     selection-background-color: {p.primary};
     selection-color: {p.on_primary};
 }}
