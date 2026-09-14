@@ -85,12 +85,7 @@ class _OperationsDialog:
             parent=self.win,
         ):
             return
-        try:
-            for key in selected:
-                issuance.confirm(self.jobs[key][0], key)
-            self.refresh()
-        except Exception as exc:
-            messagebox.showerror("Не удалось подтвердить", str(exc), parent=self.win)
+        self._run_on_selected(selected, issuance.confirm, "Не удалось подтвердить")
 
     def cancel(self):
         selected = self.tree.selection()
@@ -102,12 +97,21 @@ class _OperationsDialog:
             parent=self.win,
         ):
             return
-        try:
-            for key in selected:
-                issuance.cancel(self.jobs[key][0], key)
-            self.refresh()
-        except Exception as exc:
-            messagebox.showerror("Не удалось отменить", str(exc), parent=self.win)
+        self._run_on_selected(selected, issuance.cancel, "Не удалось отменить")
+
+    def _run_on_selected(self, selected, action, error_title):
+        # Каждый job обрабатывается независимо: падение на одном не должно
+        # прерывать остальные и оставлять дерево показывать уже
+        # обработанные операции как незавершённые.
+        errors = []
+        for key in selected:
+            try:
+                action(self.jobs[key][0], key)
+            except Exception as exc:
+                errors.append(str(exc))
+        self.refresh()
+        if errors:
+            messagebox.showerror(error_title, "\n".join(errors), parent=self.win)
 
     def open_file(self):
         selected = self.tree.selection()

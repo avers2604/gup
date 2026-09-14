@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 
@@ -96,6 +97,54 @@ def test_pass_restore_ignores_legacy_vehicle_draft():
     assert form.d_fio.get() == ""
     assert form.d_phone.get() == ""
     assert form.territory.get() == ""
+
+
+class _ThemeStub:
+    def c(self, _name):
+        return "#000000"
+
+
+class _LabelStub:
+    def __init__(self):
+        self.text = None
+
+    def config(self, text=None, **_kw):
+        if text is not None:
+            self.text = text
+
+
+def test_restored_badge_draft_with_missing_photo_shows_not_selected(tmp_path):
+    """Черновик может указывать на фото, которое удалили между запусками —
+    статус не должен врать, что оно готово к печати."""
+    from getpass_ui.badge_tab import BadgePanel
+
+    panel = BadgePanel.__new__(BadgePanel)
+    panel.theme = _ThemeStub()
+    panel.photo_status = _LabelStub()
+    panel.photo_path = str(tmp_path / "missing.jpg")
+    assert not os.path.exists(panel.photo_path)
+
+    panel._on_crop_cancel()
+
+    assert panel.photo_path is None
+    assert panel.photo_status.text == "Фото не выбрано"
+
+
+def test_restored_badge_draft_with_existing_photo_shows_selected(tmp_path):
+    from getpass_ui.badge_tab import BadgePanel
+
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"stub")
+
+    panel = BadgePanel.__new__(BadgePanel)
+    panel.theme = _ThemeStub()
+    panel.photo_status = _LabelStub()
+    panel.photo_path = str(photo)
+
+    panel._on_crop_cancel()
+
+    assert panel.photo_path == str(photo)
+    assert panel.photo_status.text == "Фото выбрано"
 
 
 def test_otb_signature_captions_are_close_to_the_line(monkeypatch):

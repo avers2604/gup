@@ -214,6 +214,8 @@ class Journal:
     def __init__(self, schema: JournalSchema):
         self.schema = schema
         self._snapshot_lock = threading.Lock()
+        self._schema_lock = threading.Lock()
+        self._schema_ready_for: str | None = None
 
     def _connect(self) -> sqlite3.Connection:
         os.makedirs(os.path.dirname(config.DB_FILE) or ".", exist_ok=True)
@@ -238,7 +240,19 @@ class Journal:
             conn.execute("PRAGMA journal_mode = WAL")
             conn.execute("PRAGMA synchronous = NORMAL")
             conn.execute("PRAGMA busy_timeout = 10000")
-            self._ensure_table(conn)
+            # _ensure_table() открывает свой BEGIN IMMEDIATE и прогоняет
+            # миграции — раньше это выполнялось на КАЖДОМ подключении, то
+            # есть на каждом read(), и брало эксклюзивную блокировку записи
+            # только чтобы убедиться, что схема не изменилась. Достаточно
+            # делать это один раз на каждый файл базы: кэш держим по пути
+            # к БД, а не просто булевым флагом — DB_FILE может смениться
+            # в рамках процесса (восстановление из бэкапа, тесты), и тогда
+            # схему для нового файла всё равно нужно проверить.
+            if self._schema_ready_for != config.DB_FILE:
+                with self._schema_lock:
+                    if self._schema_ready_for != config.DB_FILE:
+                        self._ensure_table(conn)
+                        self._schema_ready_for = config.DB_FILE
         except BaseException:
             conn.close()
             raise
