@@ -160,6 +160,7 @@ def _is_allowed_archive_name(norm: str) -> bool:
 
 
 def inspect_backup(filepath: str, password=None) -> tuple[list[str], list[str]]:
+    """Что будет восстановлено и что пропущено. Возвращает списки строк."""
     if password is not None:
         from .encryption import decrypt
 
@@ -167,7 +168,6 @@ def inspect_backup(filepath: str, password=None) -> tuple[list[str], list[str]]:
             plain = os.path.join(temporary, "backup.zip")
             decrypt(filepath, plain, password)
             return inspect_backup(plain)
-    """Что будет восстановлено и что пропущено. Возвращает списки строк."""
     accepted: list[str] = []
     skipped: list[str] = []
     with zipfile.ZipFile(filepath, "r") as zf:

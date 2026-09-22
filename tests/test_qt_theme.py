@@ -57,6 +57,43 @@ def test_phase4_table_styles_use_semantic_tokens():
     assert LIGHT.on_primary in css
 
 
+def test_labels_are_transparent_so_cards_show_through():
+    # QWidget получает непрозрачный фон ground глобально; без явного
+    # переопределения любой QLabel внутри белой карточки (role="card")
+    # рисует поверх неё несовпадающий по цвету прямоугольник фона.
+    css = build_stylesheet("light")
+    assert "QLabel {" in css and "background: transparent" in css
+
+
+def test_checkboxes_have_no_stylesheet_background():
+    # Явный background в правиле QCheckBox (даже transparent) ломает
+    # отрисовку индикатора — квадратик просто перестаёт быть виден.
+    # Регрессия найдена и подтверждена вручную при разработке.
+    css = build_stylesheet("light")
+    checkbox_rule = css.split("QCheckBox {")[1].split("}")[0]
+    assert "background" not in checkbox_rule
+
+
+def test_combobox_down_arrow_has_single_rule_for_all_states():
+    # У QComboBox::down-arrow должно быть РОВНО одно правило на все
+    # состояния. Добавление QComboBox:hover::down-arrow /
+    # QComboBox:on::down-arrow / QComboBox:disabled::down-arrow —
+    # даже с одной и той же картинкой — заставляет Qt/Fusion рисовать
+    # ДВА шеврона одновременно (второй — блёклый, по центру поля) уже
+    # в состоянии покоя, когда ни hover, ни on, ни disabled не активны.
+    # Подтверждено вручную рендером QComboBox в offscreen-режиме.
+    css = build_stylesheet("light")
+    assert css.count("::down-arrow") == 1
+
+
+def test_default_pushbutton_has_branded_shape():
+    # Без базового стиля кнопки без role остаются нативными серыми
+    # прямоугольниками среди скруглённых брендовых кнопок.
+    css = build_stylesheet("light")
+    base_rule = css.split("QPushButton {")[1].split("}")[0]
+    assert "border-radius" in base_rule
+
+
 def test_theme_manager_persists_toggle(qapp):
     saved = []
     service = SettingsService(

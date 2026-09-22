@@ -11,6 +11,12 @@ import pytest
 from getpass_core import backup
 
 
+def test_inspect_backup_has_docstring():
+    # docstring раньше оказался ПОСЛЕ ветки password-decrypt, из-за чего
+    # переставал быть __doc__ функции.
+    assert backup.inspect_backup.__doc__
+
+
 def test_rejects_paths_outside_data(tmp_path):
     archive = tmp_path / "mal.zip"
     with zipfile.ZipFile(archive, "w") as z:
