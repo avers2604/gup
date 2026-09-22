@@ -109,3 +109,27 @@ def test_settings_page_removes_selected_blacklist_entry(qtbot):
 
     assert service.removed == ["abc123"]
     assert page.blacklist_table.model().rowCount() == 0
+
+
+def test_settings_rows_keep_full_height_on_short_screen(qtbot):
+    # Без прокрутки на невысоком экране строки формы сплющивались,
+    # и текст в полях обрезался.
+    page, *_ = make_page(qtbot)
+    page.setFixedSize(830, 480)
+    page.show()
+    qtbot.waitExposed(page)
+
+    for field in (page.last_pass_num_edit, page.preview_target_combo):
+        assert field.height() >= field.sizeHint().height()
+
+
+def test_settings_save_button_stays_visible_on_short_screen(qtbot):
+    page, *_ = make_page(qtbot)
+    page.setFixedSize(830, 480)
+    page.show()
+    qtbot.waitExposed(page)
+
+    bottom = page.save_button.mapTo(page, page.save_button.rect().bottomLeft()).y()
+    assert page.save_button.isVisible()
+    assert bottom <= page.height()
+    assert page.save_button.height() >= page.save_button.sizeHint().height()

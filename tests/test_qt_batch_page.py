@@ -179,3 +179,15 @@ def test_output_result_updates_status_text(qtbot):
 
     assert "3" in page.status_label.text()
     assert "passes.pdf" in page.status_label.text()
+
+
+def test_batch_fields_keep_full_height_on_short_screen(qtbot):
+    # Без прокрутки на невысоком экране карточки сплющивались,
+    # и текст в полях и кнопках обрезался.
+    page = _page(qtbot, FakeBatchViewModel())
+    page.setFixedSize(830, 480)
+    page.show()
+    qtbot.waitExposed(page)
+
+    for widget in (page.issue_date_edit, page.import_button):
+        assert widget.height() >= widget.sizeHint().height()

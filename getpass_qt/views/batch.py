@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
     QTableView,
     QVBoxLayout,
@@ -42,12 +43,23 @@ class BatchPage(QWidget):
         self._choose_pdf = choose_pdf or self._default_choose_pdf
         self._confirm_warnings = confirm_warnings or self._default_confirm_warnings
 
+        # Без прокрутки на невысоком экране карточки сжимались ниже своей
+        # высоты, и текст в полях и кнопках обрезался.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        container = QWidget()
+        cards = QVBoxLayout(container)
+        cards.setContentsMargins(0, 0, 0, 0)
+        cards.setSpacing(12)
+        cards.addWidget(self._build_setup_card())
+        cards.addWidget(self._build_review_card(), 1)
+        cards.addWidget(self._build_output_card())
+        scroll.setWidget(container)
+
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(12)
-        root.addWidget(self._build_setup_card())
-        root.addWidget(self._build_review_card(), 1)
-        root.addWidget(self._build_output_card())
+        root.addWidget(scroll)
 
         self._connect_viewmodel()
         self._sync_kind(self._viewmodel.kind)
@@ -153,6 +165,7 @@ class BatchPage(QWidget):
         )
         self.review_table.verticalHeader().setVisible(False)
         self.review_table.horizontalHeader().setStretchLastSection(True)
+        self.review_table.setMinimumHeight(160)
         layout.addWidget(self.review_table, 1)
         return card
 
