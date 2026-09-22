@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QTableView,
     QTabWidget,
     QVBoxLayout,
@@ -64,6 +68,12 @@ class SettingsPage(QWidget):
         self._blacklist.refresh()
 
     def _build_parameters_tab(self) -> QWidget:
+        # Без прокрутки на невысоком экране QFormLayout сжимал строки ниже
+        # их высоты, и текст в полях обрезался.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(8, 12, 8, 8)
@@ -134,14 +144,31 @@ class SettingsPage(QWidget):
         badge_form.addRow("Предупреждать о дублях", self.warn_duplicates_checkbox)
         layout.addWidget(badge_group)
 
+        row_height = self.last_pass_num_edit.sizeHint().height()
+        for checkbox in (
+            self.temporary_checkbox,
+            self.print_back_checkbox,
+            self.warn_duplicates_checkbox,
+        ):
+            checkbox.setMinimumHeight(row_height)
+        self._center_labels(pass_form, row_height)
+        self._center_labels(badge_form, row_height)
+
+        layout.addStretch(1)
+        scroll.setWidget(tab)
+
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 8, 8)
+        page_layout.setSpacing(8)
+        page_layout.addWidget(scroll, 1)
         actions = QHBoxLayout()
         actions.addStretch(1)
         self.save_button = QPushButton("Сохранить настройки")
         self.save_button.clicked.connect(self._settings.save)
         actions.addWidget(self.save_button)
-        layout.addLayout(actions)
-        layout.addStretch(1)
-        return tab
+        page_layout.addLayout(actions)
+        return page
 
     def _build_blacklist_tab(self) -> QWidget:
         tab = QWidget()
@@ -157,6 +184,7 @@ class SettingsPage(QWidget):
         form.addRow("Госномер", self.plate_edit)
         form.addRow("ФИО", self.fio_edit)
         form.addRow("Инцидент", self.incident_edit)
+        self._center_labels(form, self.plate_edit.sizeHint().height())
         layout.addWidget(editor)
 
         editor_actions = QHBoxLayout()
@@ -190,6 +218,17 @@ class SettingsPage(QWidget):
         layout.addLayout(table_actions)
         return tab
 
+    @staticmethod
+    def _center_labels(form: QFormLayout, row_height: int) -> None:
+        # QFormLayout кладёт подпись по верху строки, а не по центру поля.
+        for row in range(form.rowCount()):
+            item = form.itemAt(row, QFormLayout.ItemRole.LabelRole)
+            if item is None or not isinstance(item.widget(), QLabel):
+                continue
+            label = item.widget()
+            label.setMinimumHeight(row_height)
+            label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
     def _line_edit(self, field: str, value: str) -> QLineEdit:
         widget = QLineEdit(value)
         widget.textChanged.connect(
@@ -199,6 +238,8 @@ class SettingsPage(QWidget):
 
     def _checkbox(self, field: str, value: bool) -> QCheckBox:
         widget = QCheckBox()
+        # Растянутый на всю строку чекбокс рисует полосу фона поперёк формы.
+        widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         widget.setChecked(bool(value))
         widget.toggled.connect(
             lambda checked, key=field: self._settings.set_field(key, checked)
